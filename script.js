@@ -2083,9 +2083,12 @@ async function removeChecklistItem(entityKey, itemId) {
 }
 
 /* Renders a checklist into any container, wiring up add/toggle/remove.
-   `canEdit` controls whether items can be added/removed; toggling status
-   is allowed for anyone who can see the checklist. */
-function renderChecklistInto(entityKey, listElement, formElement, inputElement, canEdit, onChange) {
+   `canAdd` controls whether new items can be added — anyone with access
+   to the checklist can add. `canDelete` controls whether the remove (×)
+   button appears — restricted to Founder / Operations Head, so regular
+   users can contribute items but can't delete someone else's. Toggling
+   an item's done status is allowed for anyone who can see the checklist. */
+function renderChecklistInto(entityKey, listElement, formElement, inputElement, canAdd, canDelete, onChange) {
 
     if (!listElement) return;
 
@@ -2103,7 +2106,7 @@ function renderChecklistInto(entityKey, listElement, formElement, inputElement, 
                 <div class="checklist-item ${done ? "is-done" : ""}" data-item-id="${escapeHtml(item.checklistId)}">
                     <input type="checkbox" ${done ? "checked" : ""} class="checklist-item-checkbox">
                     <span class="checklist-item-text">${escapeHtml(item.item)}</span>
-                    ${canEdit ? `<button type="button" class="checklist-item-remove" aria-label="Remove item">×</button>` : ""}
+                    ${canDelete ? `<button type="button" class="checklist-item-remove" aria-label="Remove item">×</button>` : ""}
                 </div>
             `;
         }).join("");
@@ -2116,7 +2119,7 @@ function renderChecklistInto(entityKey, listElement, formElement, inputElement, 
             });
         });
 
-        if (canEdit) {
+        if (canDelete) {
             listElement.querySelectorAll(".checklist-item-remove").forEach(function(button) {
                 button.addEventListener("click", async function() {
                     const itemId = button.closest(".checklist-item").dataset.itemId;
@@ -2142,7 +2145,7 @@ function renderChecklistInto(entityKey, listElement, formElement, inputElement, 
     }
 
     if (formElement) {
-        formElement.style.display = canEdit ? "flex" : "none";
+        formElement.style.display = canAdd ? "flex" : "none";
     }
 
 }
@@ -2224,7 +2227,7 @@ function initializeTaskDetailDrawer() {
 
         const entityKey = "task:" + taskDetailCurrentId;
 
-        renderChecklistInto(entityKey, checklistList, checklistForm, checklistInput, true, function() {
+        renderChecklistInto(entityKey, checklistList, checklistForm, checklistInput, true, isPrivilegedUser(), function() {
             refreshChecklist();
             updateChecklistProgressLabel(entityKey, progress);
         });
@@ -2390,6 +2393,7 @@ function openTaskDetailDrawer(taskId) {
         document.getElementById("taskDetailChecklistForm"),
         document.getElementById("taskDetailChecklistInput"),
         true,
+        privileged,
         taskDetailRefreshChecklist
     );
 
@@ -2704,7 +2708,7 @@ function renderBookFair() {
         const progressEl = document.getElementById("bfProgress-" + task.taskId);
 
         const refresh = function() {
-            renderChecklistInto(entityKey, listEl, formEl, inputEl, true, refresh);
+            renderChecklistInto(entityKey, listEl, formEl, inputEl, true, isPrivilegedUser(), refresh);
             updateChecklistProgressLabel(entityKey, progressEl);
         };
 
