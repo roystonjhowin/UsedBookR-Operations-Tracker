@@ -51,6 +51,10 @@ document.addEventListener("DOMContentLoaded", function () {
     checkLogin();
     initializePageLoader();
 
+    initializeBacklog();
+    initializeBookFair();
+    initializeTaskDetailDrawer();
+
 });
 
 /* =========================================================
@@ -362,6 +366,21 @@ function initializeDepartments() {
 
     }
 
+    const backlogSelect = document.getElementById("backlogDepartment");
+
+    if (backlogSelect) {
+
+        backlogSelect.innerHTML = '<option value="">Unassigned</option>';
+
+        DEPARTMENTS.forEach(function (department) {
+            const option = document.createElement("option");
+            option.value = department;
+            option.textContent = department;
+            backlogSelect.appendChild(option);
+        });
+
+    }
+
     renderDepartmentCards();
 
 }
@@ -479,6 +498,8 @@ function showPage(page) {
     if (page === "regularTasks") renderRegularTasks();
     if (page === "followups") renderFollowups();
     if (page === "activity") renderActivity();
+    if (page === "backlog") renderBacklog();
+    if (page === "bookFair") renderBookFair();
 
 }
 
@@ -493,6 +514,8 @@ function updatePageHeader(page) {
         regularTasks: ["Regular Tasks", "Complete and update your recurring operational tasks"],
         followups: ["Follow-ups", "Monitor commitments and pending actions"],
         activity: ["Activity Log", "Track operational changes"],
+        backlog: ["Backlog", "Future and paused tasks parked for later"],
+        bookFair: ["Book Fair", "Priority tasks and checklists for Book Fair / Events"],
     };
 
     if (names[page]) {
@@ -785,7 +808,9 @@ function renderRegularTasks() {
                 <div class="regular-task-list">
         `;
 
-        group.forEach(function(task) {
+        const orderedGroup = sortMineFirst(group, function(task) { return task.assignedTo; });
+
+        orderedGroup.forEach(function(task) {
             html += createRegularTaskCard(task);
         });
 
@@ -1122,16 +1147,20 @@ function renderTasksTable() {
 
     });
 
+    const ordered = sortMineFirst(filtered, function(task) { return task.assignedTo; });
+
     tbody.innerHTML = "";
 
-    if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-table">No matching tasks available.</td></tr>`;
+    if (!ordered.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-table">No matching tasks available.</td></tr>`;
         return;
     }
 
-    filtered.forEach(function(task) {
+    ordered.forEach(function(task) {
 
         const row = document.createElement("tr");
+        row.className = "row-clickable";
+        row.dataset.id = task.taskId;
 
         row.innerHTML = `
             <td>${escapeHTML(task.taskId)}</td>
@@ -1141,15 +1170,24 @@ function renderTasksTable() {
             <td>${priorityBadge(task.priority)}</td>
             <td>${statusBadge(task.status, task)}</td>
             <td>${displayDate(task.dueDate)}</td>
-            <td><button class="table-action edit-task" data-id="${escapeHTML(task.taskId)}">Edit</button></td>
+            <td class="checklist-cell">${checklistStatusDot("task:" + task.taskId)}</td>
+            <td>${isPrivilegedUser() ? `<button class="table-action edit-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
         `;
+
+        row.addEventListener("click", function(event) {
+            if (event.target.closest(".edit-task")) return;
+            openTaskDetailDrawer(task.taskId);
+        });
 
         tbody.appendChild(row);
 
     });
 
     tbody.querySelectorAll(".edit-task").forEach(function(button) {
-        button.addEventListener("click", function() { editTask(button.dataset.id); });
+        button.addEventListener("click", function(event) {
+            event.stopPropagation();
+            editTask(button.dataset.id);
+        });
     });
 
 }
@@ -1265,16 +1303,19 @@ function renderDepartmentTasks(departmentTasks) {
     const tbody = document.getElementById("departmentTasksTable");
     if (!tbody) return;
 
+    const ordered = sortMineFirst(departmentTasks, function(task) { return task.assignedTo; });
+
     tbody.innerHTML = "";
 
-    if (!departmentTasks.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-table">No department tasks available.</td></tr>`;
+    if (!ordered.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-table">No department tasks available.</td></tr>`;
         return;
     }
 
-    departmentTasks.forEach(function(task) {
+    ordered.forEach(function(task) {
 
         const row = document.createElement("tr");
+        row.className = "row-clickable";
 
         row.innerHTML = `
             <td>${escapeHTML(task.taskId)}</td>
@@ -1284,15 +1325,24 @@ function renderDepartmentTasks(departmentTasks) {
             <td>${statusBadge(task.status, task)}</td>
             <td>${displayDate(task.dueDate)}</td>
             <td>${displayDate(task.followupDate)}</td>
-            <td><button class="table-action edit-department-task" data-id="${escapeHTML(task.taskId)}">Edit</button></td>
+            <td class="checklist-cell">${checklistStatusDot("task:" + task.taskId)}</td>
+            <td>${isPrivilegedUser() ? `<button class="table-action edit-department-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
         `;
+
+        row.addEventListener("click", function(event) {
+            if (event.target.closest(".edit-department-task")) return;
+            openTaskDetailDrawer(task.taskId);
+        });
 
         tbody.appendChild(row);
 
     });
 
     tbody.querySelectorAll(".edit-department-task").forEach(function(button) {
-        button.addEventListener("click", function() { editTask(button.dataset.id); });
+        button.addEventListener("click", function(event) {
+            event.stopPropagation();
+            editTask(button.dataset.id);
+        });
     });
 
 }
@@ -1836,24 +1886,848 @@ function showNotification(title, message) {
     }, 3500);
 
 }
-<td class="task-actions">
 
-    <button
-        type="button"
-        class="secondary-button"
-        onclick="openTaskDetail('${escapeHtml(task.taskId)}')">
+/* =========================================================================
+   NEW FEATURES — Backlog, Checklists, Task Detail Drawer, Book Fair
+   ---------------------------------------------------------------------
+   NOTE ON PERSISTENCE: Checklists, comments and backlog items are saved
+   in this browser's localStorage (LOCAL_STORE_KEYS below), because the
+   Google Apps Script backend does not yet have endpoints for them.
+   Everything works fully right now, per-device. To make this shared
+   across everyone's devices, add matching Apps Script actions (getBacklog,
+   saveBacklogItem, getChecklist, saveChecklist, getComments, addComment)
+   backed by new Sheet tabs, then swap the LOCAL_* functions below for
+   apiRequest() calls following the same pattern as loadTasks().
+========================================================================= */
 
-        Open
+const LOCAL_STORE_KEYS = {
+    backlog: "excelso_backlog_items",
+    checklists: "excelso_checklists",
+    comments: "excelso_comments"
+};
 
-    </button>
+let taskDetailCurrentId = "";
+let backlogDetailCurrentId = "";
 
-    <button
-        type="button"
-        class="secondary-button"
-        onclick="editTask('${escapeHtml(task.taskId)}')">
+/* ---------------------------------------------------------------------
+   LOCAL STORAGE HELPERS
+--------------------------------------------------------------------- */
 
-        Edit
+function loadLocalStore(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+        console.error("Local store read error:", error);
+        return null;
+    }
+}
 
-    </button>
+function saveLocalStore(key, value) {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch (error) {
+        console.error("Local store write error:", error);
+    }
+}
 
-</td>
+function generateLocalId(prefix) {
+    return prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+/* ---------------------------------------------------------------------
+   ROLE / ACCESS HELPERS
+--------------------------------------------------------------------- */
+
+function isPrivilegedUser() {
+
+    if (!currentUser) return false;
+
+    const role = String(currentUser.role || "").trim().toLowerCase();
+
+    return role === "founder" || role === "operations head";
+
+}
+
+function currentUserMatches(assignedTo) {
+
+    if (!currentUser) return false;
+
+    const value = String(assignedTo || "").trim().toLowerCase();
+    if (!value) return false;
+
+    const username = String(currentUser.username || "").trim().toLowerCase();
+    const name = String(currentUser.name || "").trim().toLowerCase();
+
+    return value === username || value === name;
+
+}
+
+/* Sorts a list so that items assigned to the current user come first.
+   Privileged users (Founder / Operations Head) see the original order,
+   since they oversee everything rather than "their own" tasks. */
+function sortMineFirst(list, getAssignee) {
+
+    if (!Array.isArray(list)) return [];
+    if (!currentUser || isPrivilegedUser()) return list.slice();
+
+    return list
+        .map(function(item, index) { return { item: item, index: index }; })
+        .sort(function(a, b) {
+
+            const aMine = currentUserMatches(getAssignee(a.item));
+            const bMine = currentUserMatches(getAssignee(b.item));
+
+            if (aMine && !bMine) return -1;
+            if (!aMine && bMine) return 1;
+
+            return a.index - b.index;
+
+        })
+        .map(function(wrapped) { return wrapped.item; });
+
+}
+
+/* ---------------------------------------------------------------------
+   CHECKLISTS  (entityKey e.g. "task:TASK-004", "bookfair:TASK-011")
+--------------------------------------------------------------------- */
+
+function getAllChecklists() {
+    return loadLocalStore(LOCAL_STORE_KEYS.checklists) || {};
+}
+
+function getChecklist(entityKey) {
+    const all = getAllChecklists();
+    return Array.isArray(all[entityKey]) ? all[entityKey] : [];
+}
+
+function setChecklist(entityKey, items) {
+    const all = getAllChecklists();
+    all[entityKey] = items;
+    saveLocalStore(LOCAL_STORE_KEYS.checklists, all);
+}
+
+function checklistStatusDot(entityKey) {
+
+    const items = getChecklist(entityKey);
+
+    if (!items.length) {
+        return `<span class="checklist-dot checklist-dot-red" title="No checklist yet"></span>`;
+    }
+
+    const allDone = items.every(function(item) { return item.done; });
+
+    if (allDone) {
+        return `<span class="checklist-dot checklist-dot-green" title="Checklist complete"></span>`;
+    }
+
+    return `<span class="checklist-dot checklist-dot-red" title="Checklist pending"></span>`;
+
+}
+
+function addChecklistItem(entityKey, text) {
+
+    const trimmed = String(text || "").trim();
+    if (!trimmed) return;
+
+    const items = getChecklist(entityKey);
+
+    items.push({ id: generateLocalId("chk"), text: trimmed, done: false });
+
+    setChecklist(entityKey, items);
+
+}
+
+function toggleChecklistItem(entityKey, itemId) {
+
+    const items = getChecklist(entityKey);
+
+    const updated = items.map(function(item) {
+        if (item.id === itemId) {
+            return Object.assign({}, item, { done: !item.done });
+        }
+        return item;
+    });
+
+    setChecklist(entityKey, updated);
+
+}
+
+function removeChecklistItem(entityKey, itemId) {
+
+    const items = getChecklist(entityKey).filter(function(item) { return item.id !== itemId; });
+    setChecklist(entityKey, items);
+
+}
+
+/* Renders a checklist into any container, wiring up add/toggle/remove.
+   `canEdit` controls whether items can be added/removed; toggling status
+   is allowed for anyone who can see the checklist (matches the rule that
+   any user with access may update checklist item status). */
+function renderChecklistInto(entityKey, listElement, formElement, inputElement, canEdit, onChange) {
+
+    if (!listElement) return;
+
+    const items = getChecklist(entityKey);
+
+    if (!items.length) {
+        listElement.innerHTML = `<div class="checklist-empty">No checklist items yet.</div>`;
+    } else {
+
+        listElement.innerHTML = items.map(function(item) {
+            return `
+                <div class="checklist-item ${item.done ? "is-done" : ""}" data-item-id="${escapeHtml(item.id)}">
+                    <input type="checkbox" ${item.done ? "checked" : ""} class="checklist-item-checkbox">
+                    <span class="checklist-item-text">${escapeHtml(item.text)}</span>
+                    ${canEdit ? `<button type="button" class="checklist-item-remove" aria-label="Remove item">×</button>` : ""}
+                </div>
+            `;
+        }).join("");
+
+        listElement.querySelectorAll(".checklist-item-checkbox").forEach(function(checkbox) {
+            checkbox.addEventListener("change", function() {
+                const itemId = checkbox.closest(".checklist-item").dataset.itemId;
+                toggleChecklistItem(entityKey, itemId);
+                if (onChange) onChange();
+            });
+        });
+
+        if (canEdit) {
+            listElement.querySelectorAll(".checklist-item-remove").forEach(function(button) {
+                button.addEventListener("click", function() {
+                    const itemId = button.closest(".checklist-item").dataset.itemId;
+                    removeChecklistItem(entityKey, itemId);
+                    if (onChange) onChange();
+                });
+            });
+        }
+
+    }
+
+    if (formElement && !formElement.dataset.wired) {
+
+        formElement.dataset.wired = "true";
+
+        formElement.addEventListener("submit", function(event) {
+            event.preventDefault();
+            addChecklistItem(entityKey, inputElement.value);
+            inputElement.value = "";
+            if (onChange) onChange();
+        });
+
+    }
+
+    if (formElement) {
+        formElement.style.display = canEdit ? "flex" : "none";
+    }
+
+}
+
+/* ---------------------------------------------------------------------
+   COMMENTS  (entityKey e.g. "task:TASK-004", "backlog:bk-abc123")
+--------------------------------------------------------------------- */
+
+function getAllComments() {
+    return loadLocalStore(LOCAL_STORE_KEYS.comments) || {};
+}
+
+function getComments(entityKey) {
+    const all = getAllComments();
+    return Array.isArray(all[entityKey]) ? all[entityKey] : [];
+}
+
+function addComment(entityKey, text) {
+
+    const trimmed = String(text || "").trim();
+    if (!trimmed) return;
+
+    const all = getAllComments();
+    const list = Array.isArray(all[entityKey]) ? all[entityKey] : [];
+
+    list.push({
+        id: generateLocalId("cm"),
+        author: currentUser?.name || currentUser?.username || "User",
+        text: trimmed,
+        date: new Date().toISOString()
+    });
+
+    all[entityKey] = list;
+    saveLocalStore(LOCAL_STORE_KEYS.comments, all);
+
+}
+
+function formatCommentDate(iso) {
+
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) return "";
+
+    return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " · " +
+           date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+}
+
+function renderCommentsInto(entityKey, threadElement) {
+
+    if (!threadElement) return;
+
+    const comments = getComments(entityKey);
+
+    if (!comments.length) {
+        threadElement.innerHTML = `<div class="comment-empty">No comments yet — be the first to add one.</div>`;
+        return;
+    }
+
+    threadElement.innerHTML = comments.map(function(comment) {
+        return `
+            <div class="comment-bubble">
+                <div class="comment-bubble-head">
+                    <span class="comment-bubble-author">${escapeHtml(comment.author)}</span>
+                    <span class="comment-bubble-date">${escapeHtml(formatCommentDate(comment.date))}</span>
+                </div>
+                <div class="comment-bubble-text">${escapeHtml(comment.text)}</div>
+            </div>
+        `;
+    }).join("");
+
+    threadElement.scrollTop = threadElement.scrollHeight;
+
+}
+
+/* =========================================================================
+   TASK DETAIL DRAWER  (All Tasks / Master Tasks / Book Fair cards)
+========================================================================= */
+
+function initializeTaskDetailDrawer() {
+
+    const checklistForm = document.getElementById("taskDetailChecklistForm");
+    const checklistInput = document.getElementById("taskDetailChecklistInput");
+    const checklistList = document.getElementById("taskDetailChecklistList");
+    const progress = document.getElementById("taskDetailChecklistProgress");
+
+    const refreshChecklist = function() {
+
+        if (!taskDetailCurrentId) return;
+
+        const entityKey = "task:" + taskDetailCurrentId;
+
+        renderChecklistInto(entityKey, checklistList, checklistForm, checklistInput, true, function() {
+            refreshChecklist();
+            updateChecklistProgressLabel(entityKey, progress);
+        });
+
+        updateChecklistProgressLabel(entityKey, progress);
+
+        renderTasksTable();
+        if (currentDepartment) renderDepartmentTasks(tasks.filter(function(t) { return t.department === currentDepartment; }));
+        renderBookFair();
+
+    };
+
+    taskDetailRefreshChecklist = refreshChecklist;
+
+    const commentForm = document.getElementById("taskDetailCommentForm");
+    const commentInput = document.getElementById("taskDetailCommentInput");
+
+    if (commentForm) {
+        commentForm.addEventListener("submit", function(event) {
+            event.preventDefault();
+            if (!taskDetailCurrentId) return;
+            addComment("task:" + taskDetailCurrentId, commentInput.value);
+            commentInput.value = "";
+            renderCommentsInto("task:" + taskDetailCurrentId, document.getElementById("taskDetailComments"));
+        });
+    }
+
+    const statusSelect = document.getElementById("taskDetailStatus");
+
+    if (statusSelect) {
+        statusSelect.addEventListener("change", async function() {
+
+            if (!taskDetailCurrentId) return;
+
+            const task = tasks.find(function(t) { return t.taskId === taskDetailCurrentId; });
+            if (!task) return;
+
+            const updated = Object.assign({}, task, { status: statusSelect.value, updatedBy: currentUser?.name || currentUser?.username || "" });
+
+            const result = await apiRequest("updateTask", { task: { taskId: updated.taskId, status: updated.status, updatedBy: updated.updatedBy } });
+
+            if (result && result.success) {
+                showNotification("Updated", "Task status updated.");
+                await loadTasks();
+            } else {
+                showNotification("Error", result?.message || "Unable to update status.");
+            }
+
+        });
+    }
+
+    const saveMetaButton = document.getElementById("taskDetailSaveMetaButton");
+
+    if (saveMetaButton) {
+        saveMetaButton.addEventListener("click", async function() {
+
+            if (!taskDetailCurrentId) return;
+
+            const payload = {
+                taskId: taskDetailCurrentId,
+                assignedTo: document.getElementById("taskDetailAssignedTo").value,
+                priority: document.getElementById("taskDetailPriority").value,
+                dueDate: document.getElementById("taskDetailDueDate").value,
+                followupDate: document.getElementById("taskDetailFollowupDate").value,
+                updatedBy: currentUser?.name || currentUser?.username || ""
+            };
+
+            saveMetaButton.disabled = true;
+            saveMetaButton.textContent = "Saving...";
+
+            const result = await apiRequest("updateTask", { task: payload });
+
+            saveMetaButton.disabled = false;
+            saveMetaButton.textContent = "Save Changes";
+
+            if (result && result.success) {
+                showNotification("Saved", "Task details updated.");
+                await loadTasks();
+            } else {
+                showNotification("Error", result?.message || "Unable to save changes.");
+            }
+
+        });
+    }
+
+    const descriptionField = document.getElementById("taskDetailDescription");
+
+    if (descriptionField) {
+        descriptionField.addEventListener("blur", async function() {
+
+            if (!taskDetailCurrentId || !isPrivilegedUser()) return;
+
+            const task = tasks.find(function(t) { return t.taskId === taskDetailCurrentId; });
+            if (!task || task.description === descriptionField.value) return;
+
+            const result = await apiRequest("updateTask", { task: { taskId: taskDetailCurrentId, description: descriptionField.value, updatedBy: currentUser?.name || currentUser?.username || "" } });
+
+            if (result && result.success) {
+                await loadTasks();
+            }
+
+        });
+    }
+
+}
+
+let taskDetailRefreshChecklist = function() {};
+
+function updateChecklistProgressLabel(entityKey, progressElement) {
+
+    if (!progressElement) return;
+
+    const items = getChecklist(entityKey);
+    const done = items.filter(function(item) { return item.done; }).length;
+
+    progressElement.textContent = done + "/" + items.length;
+
+}
+
+function openTaskDetailDrawer(taskId) {
+
+    const task = tasks.find(function(t) { return t.taskId === taskId; });
+
+    if (!task) {
+        showNotification("Error", "Task not found.");
+        return;
+    }
+
+    taskDetailCurrentId = taskId;
+
+    const privileged = isPrivilegedUser();
+
+    setText("taskDetailName", task.task);
+    setInput("taskDetailDescription", task.description);
+    setInput("taskDetailId", task.taskId);
+    setInput("taskDetailDepartment", task.department);
+    setInput("taskDetailAssignedTo", task.assignedTo);
+    setInput("taskDetailPriority", task.priority);
+    setInput("taskDetailStatus", task.status);
+    setInput("taskDetailCreatedDate", task.createdDate);
+    setInput("taskDetailDueDate", task.dueDate);
+    setInput("taskDetailFollowupDate", task.followupDate);
+
+    ["taskDetailAssignedTo", "taskDetailPriority", "taskDetailDueDate", "taskDetailFollowupDate"].forEach(function(id) {
+        const element = document.getElementById(id);
+        if (element) element.disabled = !privileged;
+    });
+
+    const description = document.getElementById("taskDetailDescription");
+    if (description) description.disabled = !privileged;
+
+    const saveMetaButton = document.getElementById("taskDetailSaveMetaButton");
+    const lockedNote = document.getElementById("taskDetailLockedNote");
+
+    if (saveMetaButton) saveMetaButton.style.display = privileged ? "block" : "none";
+    if (lockedNote) lockedNote.style.display = privileged ? "none" : "block";
+
+    const entityKey = "task:" + taskId;
+
+    renderChecklistInto(
+        entityKey,
+        document.getElementById("taskDetailChecklistList"),
+        document.getElementById("taskDetailChecklistForm"),
+        document.getElementById("taskDetailChecklistInput"),
+        true,
+        taskDetailRefreshChecklist
+    );
+
+    updateChecklistProgressLabel(entityKey, document.getElementById("taskDetailChecklistProgress"));
+    renderCommentsInto(entityKey, document.getElementById("taskDetailComments"));
+
+    const drawer = document.getElementById("taskDetailDrawer");
+    if (drawer) drawer.style.display = "block";
+    document.body.classList.add("modal-open");
+
+}
+
+function closeTaskDetailDrawer() {
+
+    const drawer = document.getElementById("taskDetailDrawer");
+    if (drawer) drawer.style.display = "none";
+
+    document.body.classList.remove("modal-open");
+    taskDetailCurrentId = "";
+
+    renderTasksTable();
+    renderBookFair();
+
+}
+
+/* =========================================================================
+   BACKLOG
+========================================================================= */
+
+function getBacklogItems() {
+    return loadLocalStore(LOCAL_STORE_KEYS.backlog) || [];
+}
+
+function setBacklogItems(items) {
+    saveLocalStore(LOCAL_STORE_KEYS.backlog, items);
+}
+
+function initializeBacklog() {
+
+    const addButton = document.getElementById("backlogAddButton");
+    const modal = document.getElementById("backlogItemModal");
+    const closeButton = document.getElementById("closeBacklogModal");
+    const cancelButton = document.getElementById("cancelBacklogButton");
+    const form = document.getElementById("backlogItemForm");
+
+    if (addButton) {
+        addButton.addEventListener("click", function() { openBacklogItemModal(); });
+    }
+
+    if (closeButton) closeButton.addEventListener("click", closeBacklogItemModal);
+    if (cancelButton) cancelButton.addEventListener("click", closeBacklogItemModal);
+
+    if (modal) {
+        modal.addEventListener("click", function(event) {
+            if (event.target === modal) closeBacklogItemModal();
+        });
+    }
+
+    if (form) {
+        form.addEventListener("submit", function(event) {
+            event.preventDefault();
+            saveBacklogItemFromForm();
+        });
+    }
+
+    const commentForm = document.getElementById("backlogDetailCommentForm");
+    const commentInput = document.getElementById("backlogDetailCommentInput");
+
+    if (commentForm) {
+        commentForm.addEventListener("submit", function(event) {
+            event.preventDefault();
+            if (!backlogDetailCurrentId) return;
+            addComment("backlog:" + backlogDetailCurrentId, commentInput.value);
+            commentInput.value = "";
+            renderCommentsInto("backlog:" + backlogDetailCurrentId, document.getElementById("backlogDetailComments"));
+            renderBacklog();
+        });
+    }
+
+}
+
+function openBacklogItemModal(item = null) {
+
+    const modal = document.getElementById("backlogItemModal");
+    if (!modal) return;
+
+    const title = document.getElementById("backlogModalTitle");
+
+    if (item) {
+
+        title.textContent = "Edit Backlog Item";
+        setInput("editBacklogId", item.id);
+        setInput("backlogTitle", item.title);
+        setInput("backlogDepartment", item.department);
+        setInput("backlogStatus", item.status || "Backlog");
+        setInput("backlogDescription", item.description);
+
+    } else {
+
+        title.textContent = "Add Backlog Item";
+        setInput("editBacklogId", "");
+        setInput("backlogTitle", "");
+        setInput("backlogDepartment", "");
+        setInput("backlogStatus", "Backlog");
+        setInput("backlogDescription", "");
+
+    }
+
+    modal.style.display = "flex";
+    document.body.classList.add("modal-open");
+
+}
+
+function closeBacklogItemModal() {
+
+    const modal = document.getElementById("backlogItemModal");
+    if (modal) modal.style.display = "none";
+
+    document.body.classList.remove("modal-open");
+
+}
+
+function saveBacklogItemFromForm() {
+
+    const editId = getInput("editBacklogId");
+    const title = getInput("backlogTitle").trim();
+
+    if (!title) {
+        showNotification("Missing Information", "Please enter a title.");
+        return;
+    }
+
+    const items = getBacklogItems();
+
+    if (editId) {
+
+        const updated = items.map(function(item) {
+
+            if (item.id !== editId) return item;
+
+            return Object.assign({}, item, {
+                title: title,
+                department: getInput("backlogDepartment"),
+                status: getInput("backlogStatus"),
+                description: getInput("backlogDescription")
+            });
+
+        });
+
+        setBacklogItems(updated);
+
+    } else {
+
+        items.push({
+            id: generateLocalId("bk"),
+            title: title,
+            department: getInput("backlogDepartment"),
+            status: getInput("backlogStatus") || "Backlog",
+            description: getInput("backlogDescription"),
+            createdDate: todayInput(),
+            createdBy: currentUser?.name || currentUser?.username || "User"
+        });
+
+        setBacklogItems(items);
+
+    }
+
+    closeBacklogItemModal();
+    showNotification("Saved", "Backlog item saved.");
+    renderBacklog();
+
+}
+
+function renderBacklog() {
+
+    const grid = document.getElementById("backlogGrid");
+    if (!grid) return;
+
+    const items = getBacklogItems();
+    const ordered = sortMineFirst(items, function(item) { return item.createdBy; });
+
+    if (!ordered.length) {
+        grid.innerHTML = `<div class="empty-state">No backlog items yet. Add future or paused work to keep track of it here.</div>`;
+        return;
+    }
+
+    grid.innerHTML = ordered.map(function(item) {
+
+        const commentCount = getComments("backlog:" + item.id).length;
+        const statusClass = String(item.status || "Backlog").toLowerCase() === "paused" ? "status-paused" : "status-backlog";
+
+        return `
+            <div class="backlog-card" data-id="${escapeHtml(item.id)}">
+                <div class="backlog-card-top">
+                    <span class="backlog-status-chip ${statusClass}">${escapeHtml(item.status || "Backlog")}</span>
+                    ${isPrivilegedUser() ? `<button type="button" class="table-action backlog-edit-button" data-id="${escapeHtml(item.id)}">Edit</button>` : ""}
+                </div>
+                <h3>${escapeHtml(item.title)}</h3>
+                <p class="backlog-card-description">${escapeHtml(item.description || "No description yet.")}</p>
+                <div class="backlog-card-footer">
+                    <span>${escapeHtml(item.department || "Unassigned")} · ${escapeHtml(displayDate(item.createdDate))}</span>
+                    <span class="backlog-card-comment-count">💬 ${commentCount}</span>
+                </div>
+            </div>
+        `;
+
+    }).join("");
+
+    grid.querySelectorAll(".backlog-card").forEach(function(card) {
+        card.addEventListener("click", function(event) {
+            if (event.target.closest(".backlog-edit-button")) return;
+            openBacklogDetailDrawer(card.dataset.id);
+        });
+    });
+
+    grid.querySelectorAll(".backlog-edit-button").forEach(function(button) {
+        button.addEventListener("click", function(event) {
+            event.stopPropagation();
+            const item = getBacklogItems().find(function(i) { return i.id === button.dataset.id; });
+            if (item) openBacklogItemModal(item);
+        });
+    });
+
+}
+
+function openBacklogDetailDrawer(id) {
+
+    const item = getBacklogItems().find(function(i) { return i.id === id; });
+    if (!item) return;
+
+    backlogDetailCurrentId = id;
+
+    setText("backlogDetailStatusLabel", (item.status || "Backlog").toUpperCase());
+    setText("backlogDetailTitle", item.title);
+    setText("backlogDetailCreatedDate", displayDate(item.createdDate));
+    setText("backlogDetailDepartment", item.department ? "· " + item.department : "");
+    setText("backlogDetailDescription", item.description || "No description yet.");
+
+    renderCommentsInto("backlog:" + id, document.getElementById("backlogDetailComments"));
+
+    const drawer = document.getElementById("backlogDetailDrawer");
+    if (drawer) drawer.style.display = "block";
+    document.body.classList.add("modal-open");
+
+}
+
+function closeBacklogDetailDrawer() {
+
+    const drawer = document.getElementById("backlogDetailDrawer");
+    if (drawer) drawer.style.display = "none";
+
+    document.body.classList.remove("modal-open");
+    backlogDetailCurrentId = "";
+
+}
+
+/* =========================================================================
+   BOOK FAIR
+========================================================================= */
+
+function initializeBookFair() {
+
+    const addButton = document.getElementById("bookFairAddButton");
+
+    if (addButton) {
+        addButton.addEventListener("click", function() {
+            currentDepartment = "Book Fair - Events";
+            openTaskModal();
+        });
+    }
+
+}
+
+const PRIORITY_RANK = { High: 0, Medium: 1, Low: 2 };
+
+function renderBookFair() {
+
+    const grid = document.getElementById("bookFairGrid");
+    if (!grid) return;
+
+    const bookFairTasks = tasks.filter(function(task) { return task.department === "Book Fair - Events"; });
+    const ordered = sortMineFirst(bookFairTasks, function(task) { return task.assignedTo; })
+        .slice()
+        .sort(function(a, b) {
+
+            const rankA = PRIORITY_RANK[a.priority] ?? 3;
+            const rankB = PRIORITY_RANK[b.priority] ?? 3;
+
+            if (rankA !== rankB) return rankA - rankB;
+
+            return String(a.dueDate).localeCompare(String(b.dueDate));
+
+        });
+
+    if (!ordered.length) {
+        grid.innerHTML = `<div class="empty-state">No Book Fair tasks yet. Add one to get started.</div>`;
+        return;
+    }
+
+    grid.innerHTML = ordered.map(function(task) {
+
+        const priorityClass = "priority-border-" + String(task.priority || "").toLowerCase();
+
+        return `
+            <div class="bookfair-card ${priorityClass}" data-id="${escapeHtml(task.taskId)}">
+                <div class="bookfair-card-top">
+                    <h3>${escapeHtml(task.task)}</h3>
+                    ${priorityBadge(task.priority)}
+                </div>
+                <div class="bookfair-card-meta">
+                    <span>${statusBadge(task.status, task)}</span>
+                    <span>${escapeHtml(task.assignedTo || "Unassigned")}</span>
+                    <span>Due ${escapeHtml(displayDate(task.dueDate))}</span>
+                </div>
+                <div class="bookfair-checklist-mini">
+                    <div class="detail-drawer-section-header">
+                        <h3>Checklist</h3>
+                        <span class="checklist-progress" id="bfProgress-${escapeHtml(task.taskId)}"></span>
+                    </div>
+                    <div class="checklist-list" id="bfChecklist-${escapeHtml(task.taskId)}"></div>
+                    <form class="checklist-add-form" id="bfChecklistForm-${escapeHtml(task.taskId)}">
+                        <input type="text" placeholder="Add checklist item..." id="bfChecklistInput-${escapeHtml(task.taskId)}">
+                        <button type="submit">+ Add</button>
+                    </form>
+                </div>
+            </div>
+        `;
+
+    }).join("");
+
+    ordered.forEach(function(task) {
+
+        const entityKey = "task:" + task.taskId;
+        const listEl = document.getElementById("bfChecklist-" + task.taskId);
+        const formEl = document.getElementById("bfChecklistForm-" + task.taskId);
+        const inputEl = document.getElementById("bfChecklistInput-" + task.taskId);
+        const progressEl = document.getElementById("bfProgress-" + task.taskId);
+
+        const refresh = function() {
+            renderChecklistInto(entityKey, listEl, formEl, inputEl, true, refresh);
+            updateChecklistProgressLabel(entityKey, progressEl);
+        };
+
+        refresh();
+
+    });
+
+    grid.querySelectorAll(".bookfair-card-top, .bookfair-card-meta").forEach(function(clickable) {
+        clickable.addEventListener("click", function() {
+            const card = clickable.closest(".bookfair-card");
+            openTaskDetailDrawer(card.dataset.id);
+        });
+    });
+
+}
