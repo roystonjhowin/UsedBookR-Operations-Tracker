@@ -2538,10 +2538,20 @@ function initializeBacklog() {
         });
     }
 
-    if (form) {
+       if (form) {
         form.addEventListener("submit", async function(event) {
+
             event.preventDefault();
-            await saveBacklogItemFromForm();
+
+            if (isRequestActive("saveBacklog")) return;
+
+            const submitButton = document.getElementById("saveBacklogItemButton");
+            setButtonLoading(submitButton, true);
+
+            await guardAsync("saveBacklog", saveBacklogItemFromForm);
+
+            setButtonLoading(submitButton, false);
+
         });
     }
 
