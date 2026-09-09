@@ -1836,3 +1836,24 @@ function showNotification(title, message) {
     }, 3500);
 
 }
+<td class="task-actions">
+
+    <button
+        type="button"
+        class="secondary-button"
+        onclick="openTaskDetail('${escapeHtml(task.taskId)}')">
+
+        Open
+
+    </button>
+
+    <button
+        type="button"
+        class="secondary-button"
+        onclick="editTask('${escapeHtml(task.taskId)}')">
+
+        Edit
+
+    </button>
+
+</td>
