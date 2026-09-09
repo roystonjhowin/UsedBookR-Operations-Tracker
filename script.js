@@ -1614,21 +1614,14 @@ function populateTaskForm(task) {
 
 async function saveTask() {
 
-    if (isSavingTask) return;
-
-    isSavingTask = true;
+    if (isRequestActive("saveTask")) return;
 
     const submitButton = document.querySelector("#taskForm .primary-button");
-
     setButtonLoading(submitButton, true);
 
-    try {
-        await saveTaskRequest();
-    }
-    finally {
-        isSavingTask = false;
-        setButtonLoading(submitButton, false);
-    }
+    await guardAsync("saveTask", saveTaskRequest);
+
+    setButtonLoading(submitButton, false);
 
 }
 
