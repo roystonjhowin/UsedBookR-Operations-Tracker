@@ -100,7 +100,13 @@
             <button class="nav-item" data-page="tasks">
                 <span class="nav-icon">✓</span><span>All Tasks</span>
             </button>
+            <button class="nav-item" data-page="backlog">
+    <span class="nav-icon">▤</span><span>Backlog</span>
+</button>
 
+<button class="nav-item" data-page="bookFair">
+    <span class="nav-icon">★</span><span>Book Fair</span>
+</button>
             <button class="nav-item" data-page="regularTasks">
                 <span class="nav-icon">↺</span><span>Regular Tasks</span>
             </button>
@@ -330,7 +336,197 @@
                     </div>
                 </div>
             </section>
+<!-- BACKLOG -->
+<section id="backlogPage" class="page">
 
+    <div class="page-header">
+        <div>
+            <span class="page-label">FUTURE & PAUSED WORK</span>
+            <h2>Backlog</h2>
+            <p>Manage future tasks, planned work and paused tasks.</p>
+        </div>
+
+        <button id="backlogAddButton"
+                class="primary-button"
+                type="button">
+            + Add Backlog Task
+        </button>
+    </div>
+
+    <div class="filter-panel">
+
+        <div class="filter-field">
+            <label for="backlogSearch">Search</label>
+            <input
+                type="search"
+                id="backlogSearch"
+                placeholder="Search backlog tasks..."
+            >
+        </div>
+
+        <div class="filter-field">
+            <label for="backlogStatusFilter">Status</label>
+
+            <select id="backlogStatusFilter">
+                <option value="">All Statuses</option>
+                <option value="Future">Future</option>
+                <option value="Paused">Paused</option>
+                <option value="Active">Active</option>
+            </select>
+        </div>
+
+    </div>
+
+    <div class="panel">
+
+        <div class="table-container">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Task</th>
+                        <th>Description</th>
+                        <th>Department</th>
+                        <th>Priority</th>
+                        <th>Status</th>
+                        <th>Created Date</th>
+                        <th>Created By</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+
+                <tbody id="backlogTable">
+
+                    <tr>
+                        <td colspan="9"
+                            class="empty-table">
+                            Loading backlog...
+                        </td>
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</section>
+            <!-- BOOK FAIR -->
+<section id="bookFairPage" class="page">
+
+    <div class="page-header">
+
+        <div>
+            <span class="page-label">EVENT OPERATIONS</span>
+            <h2>Book Fair</h2>
+            <p>
+                Priority event tasks and operational checklists.
+                Active priority tasks always appear first.
+            </p>
+        </div>
+
+        <button id="bookFairAddTaskButton"
+                class="primary-button"
+                type="button">
+            + Add Book Fair Task
+        </button>
+
+    </div>
+
+
+    <!-- BOOK FAIR TASKS -->
+
+    <div class="panel">
+
+        <div class="panel-header">
+
+            <div>
+                <h3>Book Fair Tasks</h3>
+
+                <p>
+                    Active high-priority tasks appear first.
+                    Completed tasks automatically move below active work.
+                </p>
+            </div>
+
+        </div>
+
+
+        <div class="table-container">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Task</th>
+                        <th>Assigned To</th>
+                        <th>Priority</th>
+                        <th>Status</th>
+                        <th>Due Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+
+                <tbody id="bookFairTasksTable">
+
+                    <tr>
+                        <td colspan="7"
+                            class="empty-table">
+                            Loading Book Fair tasks...
+                        </td>
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+
+    <!-- BOOK FAIR CHECKLIST -->
+
+    <div class="panel bookfair-checklist-panel">
+
+        <div class="panel-header">
+
+            <div>
+                <h3>Book Fair Master Checklist</h3>
+
+                <p>
+                    Track event preparation and operational requirements.
+                </p>
+            </div>
+
+            <button id="addBookFairChecklistButton"
+                    class="secondary-button"
+                    type="button">
+
+                + Add Checklist
+
+            </button>
+
+        </div>
+
+
+        <div id="bookFairChecklistContainer"
+             class="bookfair-checklist-container">
+
+            <div class="empty-state">
+                Loading Book Fair checklist...
+            </div>
+
+        </div>
+
+    </div>
+
+</section>
             <!-- FOLLOW UPS -->
             <section id="followupsPage" class="page">
                 <div class="page-header">
@@ -416,7 +612,520 @@
         </div>
     </main>
 </div>
+<!-- TASK DETAIL MODAL -->
 
+<div id="taskDetailModal"
+     class="task-detail-overlay"
+     style="display:none;">
+
+    <div class="task-detail-modal">
+
+
+        <!-- HEADER -->
+
+        <div class="task-detail-header">
+
+            <div>
+
+                <span class="modal-label">
+                    TASK DETAILS
+                </span>
+
+                <h2 id="taskDetailTitle">
+                    Task Details
+                </h2>
+
+            </div>
+
+
+            <button id="closeTaskDetailModal"
+                    class="modal-close"
+                    type="button"
+                    aria-label="Close">
+
+                ×
+
+            </button>
+
+        </div>
+
+
+        <!-- BODY -->
+
+        <div class="task-detail-layout">
+
+
+            <!-- LEFT 80% -->
+
+            <div class="task-detail-main">
+
+
+                <!-- DESCRIPTION -->
+
+                <div class="task-detail-section">
+
+                    <div class="task-detail-section-header">
+
+                        <div>
+
+                            <span class="page-label">
+                                DESCRIPTION
+                            </span>
+
+                            <h3>
+                                Task Information
+                            </h3>
+
+                        </div>
+
+                    </div>
+
+
+                    <div id="taskDetailDescription"
+                         class="task-description-content">
+
+                        No description available.
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- CHECKLIST -->
+
+                <div class="task-detail-section">
+
+                    <div class="task-detail-section-header">
+
+                        <div>
+
+                            <span class="page-label">
+                                CHECKLIST
+                            </span>
+
+                            <h3>
+                                Task Checklist
+                            </h3>
+
+                        </div>
+
+
+                        <button id="addChecklistButton"
+                                class="secondary-button"
+                                type="button">
+
+                            + Add Item
+
+                        </button>
+
+                    </div>
+
+
+                    <div id="taskChecklistContainer"
+                         class="task-checklist-container">
+
+                        <div class="empty-state">
+                            Loading checklist...
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- COMMENTS -->
+
+                <div class="task-detail-section comments-section">
+
+                    <div class="task-detail-section-header">
+
+                        <div>
+
+                            <span class="page-label">
+                                DISCUSSION
+                            </span>
+
+                            <h3>
+                                Comments
+                            </h3>
+
+                        </div>
+
+                    </div>
+
+
+                    <div id="taskCommentsContainer"
+                         class="task-comments-container">
+
+                        <div class="empty-state">
+                            No comments yet.
+                        </div>
+
+                    </div>
+
+
+                    <!-- ADD COMMENT -->
+
+                    <div class="add-comment-box">
+
+                        <textarea id="taskCommentInput"
+                                  rows="4"
+                                  placeholder="Write a comment or update..."></textarea>
+
+
+                        <div class="comment-action-row">
+
+                            <span>
+                                Your comment will be visible to
+                                users with access to this task.
+                            </span>
+
+
+                            <button id="addTaskCommentButton"
+                                    class="primary-button"
+                                    type="button">
+
+                                Add Comment
+
+                            </button>
+
+                        </div>
+
+                    </div>
+
+
+                </div>
+
+
+            </div>
+
+
+
+            <!-- RIGHT 20% -->
+
+            <aside class="task-detail-sidebar">
+
+
+                <div class="task-info-group">
+
+                    <span>Task ID</span>
+
+                    <strong id="detailTaskId">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <div class="task-info-group">
+
+                    <span>Department</span>
+
+                    <strong id="detailTaskDepartment">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <div class="task-info-group">
+
+                    <span>Assigned To</span>
+
+                    <strong id="detailTaskAssignedTo">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <div class="task-info-group">
+
+                    <span>Priority</span>
+
+                    <strong id="detailTaskPriority">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <!-- STATUS CAN BE UPDATED BY USERS -->
+
+                <div class="task-info-group task-status-control">
+
+                    <span>Status</span>
+
+
+                    <select id="detailTaskStatus">
+
+                        <option value="Open">
+                            Open
+                        </option>
+
+                        <option value="In Progress">
+                            In Progress
+                        </option>
+
+                        <option value="Blocked">
+                            Blocked
+                        </option>
+
+                        <option value="Completed">
+                            Completed
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="task-info-group">
+
+                    <span>Created Date</span>
+
+                    <strong id="detailTaskCreatedDate">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <div class="task-info-group">
+
+                    <span>Due Date</span>
+
+                    <strong id="detailTaskDueDate">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <div class="task-info-group">
+
+                    <span>Follow-up Date</span>
+
+                    <strong id="detailTaskFollowupDate">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <div class="task-info-group">
+
+                    <span>Last Updated</span>
+
+                    <strong id="detailTaskUpdatedDate">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <button id="saveTaskStatusButton"
+                        class="primary-button task-status-save"
+                        type="button">
+
+                    Update Status
+
+                </button>
+
+
+                <!-- ONLY FOUNDER / OPERATIONS HEAD -->
+
+                <button id="editFullTaskButton"
+                        class="secondary-button full-edit-button"
+                        type="button">
+
+                    Edit Full Task
+
+                </button>
+
+
+            </aside>
+
+
+        </div>
+
+    </div>
+
+</div>
+    <!-- BACKLOG TASK MODAL -->
+
+<div id="backlogModal"
+     class="modal-overlay"
+     style="display:none;">
+
+    <div class="modal">
+
+        <div class="modal-header">
+
+            <div>
+
+                <span class="modal-label">
+                    BACKLOG
+                </span>
+
+                <h2 id="backlogModalTitle">
+                    Add Backlog Task
+                </h2>
+
+            </div>
+
+
+            <button id="closeBacklogModal"
+                    class="modal-close"
+                    type="button">
+
+                ×
+
+            </button>
+
+        </div>
+
+
+        <form id="backlogForm">
+
+            <input type="hidden"
+                   id="editBacklogId">
+
+
+            <div class="form-grid">
+
+
+                <div class="form-group full-width">
+
+                    <label for="backlogTaskName">
+                        Task *
+                    </label>
+
+                    <input type="text"
+                           id="backlogTaskName"
+                           placeholder="Enter future or paused task"
+                           required>
+
+                </div>
+
+
+
+                <div class="form-group full-width">
+
+                    <label for="backlogDescription">
+                        Description
+                    </label>
+
+                    <textarea id="backlogDescription"
+                              rows="5"
+                              placeholder="Describe the task, future plan or reason for pausing..."></textarea>
+
+                </div>
+
+
+
+                <div class="form-group">
+
+                    <label for="backlogDepartment">
+                        Department
+                    </label>
+
+                    <select id="backlogDepartment">
+
+                        <option value="">
+                            Select Department
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+
+                <div class="form-group">
+
+                    <label for="backlogPriority">
+                        Priority
+                    </label>
+
+                    <select id="backlogPriority">
+
+                        <option value="High">
+                            High
+                        </option>
+
+                        <option value="Medium"
+                                selected>
+                            Medium
+                        </option>
+
+                        <option value="Low">
+                            Low
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+
+                <div class="form-group">
+
+                    <label for="backlogStatus">
+                        Status
+                    </label>
+
+                    <select id="backlogStatus">
+
+                        <option value="Future">
+                            Future
+                        </option>
+
+                        <option value="Paused">
+                            Paused
+                        </option>
+
+                        <option value="Active">
+                            Active
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+            </div>
+
+
+            <div class="modal-footer">
+
+                <button id="cancelBacklogButton"
+                        type="button"
+                        class="secondary-button">
+
+                    Cancel
+
+                </button>
+
+
+                <button type="submit"
+                        class="primary-button">
+
+                    Save Backlog Task
+
+                </button>
+
+            </div>
+
+
+        </form>
+
+
+    </div>
+
+</div>
 <!-- TASK MODAL -->
 <div id="taskModal" class="modal-overlay" style="display:none;">
     <div class="modal">
