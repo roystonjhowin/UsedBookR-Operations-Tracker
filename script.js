@@ -952,7 +952,7 @@ function initializeRegularTaskUpdateForm() {
     if (form.dataset.initialized === "true") return;
     form.dataset.initialized = "true";
 
-    form.addEventListener("submit", async function(event) {
+       form.addEventListener("submit", async function(event) {
 
         event.preventDefault();
 
@@ -976,22 +976,28 @@ function initializeRegularTaskUpdateForm() {
             return;
         }
 
-        const button = document.getElementById("saveRegularTaskUpdateButton");
+        const guardKey = "regularTaskUpdate-" + regularTaskId;
+        if (isRequestActive(guardKey)) return;
 
+        const button = document.getElementById("saveRegularTaskUpdateButton");
         if (button) { button.disabled = true; button.textContent = "Saving..."; }
 
         try {
 
-            const result = await apiRequest("saveRegularTaskUpdate", {
-                regularTaskId: regularTaskId,
-                status: status,
-                description: description,
-                updatedBy: currentUser?.username || currentUser?.name || "Website"
-            });
+            await guardAsync(guardKey, async function() {
 
-            if (!result || !result.success) {
-                throw new Error(result?.message || "Unable to save update.");
-            }
+                const result = await apiRequest("saveRegularTaskUpdate", {
+                    regularTaskId: regularTaskId,
+                    status: status,
+                    description: description,
+                    updatedBy: currentUser?.username || currentUser?.name || "Website"
+                });
+
+                if (!result || !result.success) {
+                    throw new Error(result?.message || "Unable to save update.");
+                }
+
+            });
 
             closeRegularTaskUpdate();
             showNotification("Updated", "Regular task update saved successfully.");
@@ -1019,8 +1025,6 @@ function initializeRegularTaskUpdateForm() {
         }
 
     });
-
-}
 
 /* =========================================================
    CREATE REGULAR TASK CARD
