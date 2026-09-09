@@ -948,11 +948,11 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 
 .modal-close:hover { background: #fbe4e2; color: var(--danger); transform: rotate(90deg); }
 
-#taskForm { padding: 24px; }
+#taskForm, #backlogItemForm { padding: 24px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .full-width { grid-column: 1 / -1; }
 
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+.modal-footer { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
 
 /* =========================================================
    REGULAR TASKS
@@ -1111,7 +1111,11 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
     .full-width { grid-column: auto; }
     .login-card { padding: 30px 22px; border-radius: 18px; }
     .notification { right: 14px; left: 14px; bottom: 14px; width: auto; }
-    .modal-header, #taskForm { padding: 18px; }
+    .modal-header, #taskForm, #backlogItemForm { padding: 18px; }
+    .modal-overlay { padding: 12px; align-items: flex-end; }
+    .modal { max-height: 92vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+    .modal-footer { flex-direction: column-reverse; }
+    .modal-footer .primary-button, .modal-footer .secondary-button { width: 100%; }
 }
 
 @media (max-width: 420px) {
@@ -1172,16 +1176,24 @@ tr.row-clickable:hover { background: var(--surface-alt); }
     padding: 18px;
     cursor: pointer;
     box-shadow: var(--shadow-sm);
-    transition: transform 0.2s var(--ease-soft), box-shadow 0.2s var(--ease-soft), border-color 0.2s var(--ease-soft);
+    transition: transform 0.22s var(--ease-soft), box-shadow 0.22s var(--ease-soft), border-color 0.22s var(--ease-soft);
+    animation: card-in 0.35s var(--ease) both;
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
 .backlog-card:hover {
-    transform: translateY(-3px);
+    transform: translateY(-4px);
     box-shadow: var(--shadow-md);
     border-color: var(--forest-mid);
+}
+
+.backlog-card:active { transform: translateY(-1px); }
+
+@keyframes card-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .backlog-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
@@ -1197,6 +1209,7 @@ tr.row-clickable:hover { background: var(--surface-alt); }
     background: var(--surface-alt);
     border: 1px solid var(--border);
     color: var(--muted);
+    transition: background 0.2s var(--ease-soft), color 0.2s var(--ease-soft), border-color 0.2s var(--ease-soft);
 }
 
 .backlog-status-chip.status-paused { color: var(--warning); border-color: var(--gold-soft); background: #fbf3e0; }
@@ -1243,13 +1256,14 @@ tr.row-clickable:hover { background: var(--surface-alt); }
     border-radius: var(--radius-md);
     padding: 18px;
     box-shadow: var(--shadow-sm);
-    transition: transform 0.2s var(--ease-soft), box-shadow 0.2s var(--ease-soft);
+    transition: transform 0.22s var(--ease-soft), box-shadow 0.22s var(--ease-soft);
+    animation: card-in 0.35s var(--ease) both;
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
-.bookfair-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.bookfair-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
 
 .bookfair-card.priority-border-high { border-left-color: var(--danger); }
 .bookfair-card.priority-border-medium { border-left-color: var(--gold); }
