@@ -2172,18 +2172,43 @@ function renderChecklistInto(entityKey, listElement, formElement, inputElement, 
 
         listElement.querySelectorAll(".checklist-item-checkbox").forEach(function(checkbox) {
             checkbox.addEventListener("change", async function() {
+
                 const itemId = checkbox.closest(".checklist-item").dataset.itemId;
-                await toggleChecklistItem(entityKey, itemId);
+                const guardKey = "checklist-toggle-" + itemId;
+
+                if (isRequestActive(guardKey)) {
+                    checkbox.checked = !checkbox.checked; // revert the click, ignore
+                    return;
+                }
+
+                checkbox.disabled = true;
+
+                await guardAsync(guardKey, async function() {
+                    await toggleChecklistItem(entityKey, itemId);
+                });
+
                 if (onChange) onChange();
+
             });
         });
 
         if (canDelete) {
             listElement.querySelectorAll(".checklist-item-remove").forEach(function(button) {
                 button.addEventListener("click", async function() {
+
                     const itemId = button.closest(".checklist-item").dataset.itemId;
-                    await removeChecklistItem(entityKey, itemId);
+                    const guardKey = "checklist-remove-" + itemId;
+
+                    if (isRequestActive(guardKey)) return;
+
+                    button.disabled = true;
+
+                    await guardAsync(guardKey, async function() {
+                        await removeChecklistItem(entityKey, itemId);
+                    });
+
                     if (onChange) onChange();
+
                 });
             });
         }
@@ -2195,10 +2220,27 @@ function renderChecklistInto(entityKey, listElement, formElement, inputElement, 
         formElement.dataset.wired = "true";
 
         formElement.addEventListener("submit", async function(event) {
+
             event.preventDefault();
-            await addChecklistItem(entityKey, inputElement.value);
+
+            const value = inputElement.value.trim();
+            if (!value) return;
+
+            const guardKey = "checklist-add-" + entityKey;
+            if (isRequestActive(guardKey)) return;
+
+            const submitButton = formElement.querySelector("button[type='submit']");
+            setButtonLoading(submitButton, true);
+
+            await guardAsync(guardKey, async function() {
+                await addChecklistItem(entityKey, value);
+            });
+
             inputElement.value = "";
+            setButtonLoading(submitButton, false);
+
             if (onChange) onChange();
+
         });
 
     }
