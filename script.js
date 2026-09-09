@@ -2339,16 +2339,32 @@ function initializeTaskDetailDrawer() {
     const commentForm = document.getElementById("taskDetailCommentForm");
     const commentInput = document.getElementById("taskDetailCommentInput");
 
-    if (commentForm) {
+       if (commentForm) {
         commentForm.addEventListener("submit", async function(event) {
+
             event.preventDefault();
             if (!taskDetailCurrentId) return;
-            await addComment("task:" + taskDetailCurrentId, commentInput.value);
+
+            const value = commentInput.value.trim();
+            if (!value) return;
+
+            const guardKey = "comment-task-" + taskDetailCurrentId;
+            if (isRequestActive(guardKey)) return;
+
+            const submitButton = commentForm.querySelector("button[type='submit']");
+            setButtonLoading(submitButton, true);
+
+            await guardAsync(guardKey, async function() {
+                await addComment("task:" + taskDetailCurrentId, value);
+            });
+
             commentInput.value = "";
+            setButtonLoading(submitButton, false);
+
             renderCommentsInto("task:" + taskDetailCurrentId, document.getElementById("taskDetailComments"));
+
         });
     }
-
     const statusSelect = document.getElementById("taskDetailStatus");
 
     if (statusSelect) {
