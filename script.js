@@ -2574,14 +2574,31 @@ function initializeBacklog() {
     const commentForm = document.getElementById("backlogDetailCommentForm");
     const commentInput = document.getElementById("backlogDetailCommentInput");
 
-    if (commentForm) {
+       if (commentForm) {
         commentForm.addEventListener("submit", async function(event) {
+
             event.preventDefault();
             if (!backlogDetailCurrentId) return;
-            await addComment("backlog:" + backlogDetailCurrentId, commentInput.value);
+
+            const value = commentInput.value.trim();
+            if (!value) return;
+
+            const guardKey = "comment-backlog-" + backlogDetailCurrentId;
+            if (isRequestActive(guardKey)) return;
+
+            const submitButton = commentForm.querySelector("button[type='submit']");
+            setButtonLoading(submitButton, true);
+
+            await guardAsync(guardKey, async function() {
+                await addComment("backlog:" + backlogDetailCurrentId, value);
+            });
+
             commentInput.value = "";
+            setButtonLoading(submitButton, false);
+
             renderCommentsInto("backlog:" + backlogDetailCurrentId, document.getElementById("backlogDetailComments"));
             renderBacklog();
+
         });
     }
 
