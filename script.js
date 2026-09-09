@@ -633,7 +633,58 @@ function getAllowedDepartments() {
     return departments;
 
 }
+/* =========================================================
+   REQUEST GUARD + MASCOT LOADER
+   Prevents duplicate submissions (double-clicks / slow network)
+   and shows a small "Saving…" mascot while any write request
+   is in flight.
+========================================================= */
 
+const activeRequests = new Set();
+
+function isRequestActive(key) {
+    return activeRequests.has(key);
+}
+
+async function guardAsync(key, fn) {
+
+    if (activeRequests.has(key)) return;
+
+    activeRequests.add(key);
+    showActionLoader();
+
+    try {
+        return await fn();
+    }
+    catch (error) {
+        console.error("Guarded request failed:", key, error);
+        throw error;
+    }
+    finally {
+        activeRequests.delete(key);
+        if (activeRequests.size === 0) hideActionLoader();
+    }
+
+}
+
+function showActionLoader(text) {
+
+    const loader = document.getElementById("actionLoader");
+    if (!loader) return;
+
+    const label = document.getElementById("actionLoaderText");
+    if (label) label.textContent = text || "Saving…";
+
+    loader.classList.add("show");
+
+}
+
+function hideActionLoader() {
+
+    const loader = document.getElementById("actionLoader");
+    if (loader) loader.classList.remove("show");
+
+}
 /* =========================================================
    NORMALIZE API DATA
 ========================================================= */
@@ -1869,7 +1920,15 @@ function csvEscape(value) {
     const text = String(value ?? "");
     return '"' + text.replace(/"/g, '""') + '"';
 }
-
+<!-- ACTION LOADER (mini mascot shown while saving) -->
+<div id="actionLoader" class="action-loader" aria-live="polite">
+    <div class="action-loader-mascot">
+        <div class="action-loader-page action-loader-page-1"></div>
+        <div class="action-loader-page action-loader-page-2"></div>
+        <div class="action-loader-spine"></div>
+    </div>
+    <span id="actionLoaderText">Saving…</span>
+</div>
 /* =========================================================
    NOTIFICATION
 ========================================================= */
