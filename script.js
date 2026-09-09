@@ -157,6 +157,9 @@ function initializeLogin() {
 
             await loadTasks();
             await loadRegularTasks();
+            await loadAllChecklists();
+            await loadAllComments();
+            await loadBacklogTasks();
 
             applyUserAccess();
 
@@ -212,6 +215,9 @@ function checkLogin() {
             updateLoggedInUserProfile();
             loadTasks();
             loadRegularTasks();
+            loadAllChecklists();
+            loadAllComments();
+            loadBacklogTasks();
             applyUserAccess();
 
         }
@@ -1890,49 +1896,70 @@ function showNotification(title, message) {
 /* =========================================================================
    NEW FEATURES — Backlog, Checklists, Task Detail Drawer, Book Fair
    ---------------------------------------------------------------------
-   NOTE ON PERSISTENCE: Checklists, comments and backlog items are saved
-   in this browser's localStorage (LOCAL_STORE_KEYS below), because the
-   Google Apps Script backend does not yet have endpoints for them.
-   Everything works fully right now, per-device. To make this shared
-   across everyone's devices, add matching Apps Script actions (getBacklog,
-   saveBacklogItem, getChecklist, saveChecklist, getComments, addComment)
-   backed by new Sheet tabs, then swap the LOCAL_* functions below for
-   apiRequest() calls following the same pattern as loadTasks().
+   PERSISTENCE: Checklists, comments and backlog items are now saved
+   through the Apps Script backend (Task Checklists / Task Comments /
+   Backlog sheet tabs) via apiRequest() — the same pattern loadTasks()
+   uses. Each is cached in memory (allChecklists, allComments,
+   backlogTasks) and reloaded after every write, so everyone sees the
+   same data regardless of device or browser.
 ========================================================================= */
 
-const LOCAL_STORE_KEYS = {
-    backlog: "excelso_backlog_items",
-    checklists: "excelso_checklists",
-    comments: "excelso_comments"
-};
+let allChecklists = {};   // taskId -> array of checklist items
+let allComments = {};     // taskId (or backlogId) -> array of comments
+let backlogTasks = [];    // array of backlog items from the backend
 
 let taskDetailCurrentId = "";
 let backlogDetailCurrentId = "";
 
-/* ---------------------------------------------------------------------
-   LOCAL STORAGE HELPERS
---------------------------------------------------------------------- */
-
-function loadLocalStore(key) {
-    try {
-        const raw = localStorage.getItem(key);
-        return raw ? JSON.parse(raw) : null;
-    } catch (error) {
-        console.error("Local store read error:", error);
-        return null;
-    }
-}
-
-function saveLocalStore(key, value) {
-    try {
-        localStorage.setItem(key, JSON.stringify(value));
-    } catch (error) {
-        console.error("Local store write error:", error);
-    }
-}
-
 function generateLocalId(prefix) {
     return prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function currentUserLabel() {
+    return (currentUser && (currentUser.name || currentUser.username)) || "Website";
+}
+
+/* ---------------------------------------------------------------------
+   BACKEND LOADERS
+--------------------------------------------------------------------- */
+
+async function loadAllChecklists() {
+
+    const result = await apiRequest("getTaskChecklists", { taskId: "" });
+
+    allChecklists = {};
+
+    if (result && result.success && Array.isArray(result.checklists)) {
+        result.checklists.forEach(function(item) {
+            const key = item.taskId;
+            if (!allChecklists[key]) allChecklists[key] = [];
+            allChecklists[key].push(item);
+        });
+    }
+
+}
+
+async function loadAllComments() {
+
+    const result = await apiRequest("getTaskComments", { taskId: "" });
+
+    allComments = {};
+
+    if (result && result.success && Array.isArray(result.comments)) {
+        result.comments.forEach(function(item) {
+            const key = item.taskId;
+            if (!allComments[key]) allComments[key] = [];
+            allComments[key].push(item);
+        });
+    }
+
+}
+
+async function loadBacklogTasks() {
+
+    const result = await apiRequest("getBacklog", {});
+    backlogTasks = (result && result.success && Array.isArray(result.tasks)) ? result.tasks : [];
+
 }
 
 /* ---------------------------------------------------------------------
@@ -1963,9 +1990,6 @@ function currentUserMatches(assignedTo) {
 
 }
 
-/* Sorts a list so that items assigned to the current user come first.
-   Privileged users (Founder / Operations Head) see the original order,
-   since they oversee everything rather than "their own" tasks. */
 function sortMineFirst(list, getAssignee) {
 
     if (!Array.isArray(list)) return [];
@@ -1989,22 +2013,16 @@ function sortMineFirst(list, getAssignee) {
 }
 
 /* ---------------------------------------------------------------------
-   CHECKLISTS  (entityKey e.g. "task:TASK-004", "bookfair:TASK-011")
+   CHECKLISTS  (entityKey e.g. "task:T004", "bookfair:T011")
 --------------------------------------------------------------------- */
 
-function getAllChecklists() {
-    return loadLocalStore(LOCAL_STORE_KEYS.checklists) || {};
+function idFromEntityKey(entityKey) {
+    const parts = String(entityKey || "").split(":");
+    return parts.length > 1 ? parts.slice(1).join(":") : entityKey;
 }
 
 function getChecklist(entityKey) {
-    const all = getAllChecklists();
-    return Array.isArray(all[entityKey]) ? all[entityKey] : [];
-}
-
-function setChecklist(entityKey, items) {
-    const all = getAllChecklists();
-    all[entityKey] = items;
-    saveLocalStore(LOCAL_STORE_KEYS.checklists, all);
+    return allChecklists[idFromEntityKey(entityKey)] || [];
 }
 
 function checklistStatusDot(entityKey) {
@@ -2015,7 +2033,7 @@ function checklistStatusDot(entityKey) {
         return `<span class="checklist-dot checklist-dot-red" title="No checklist yet"></span>`;
     }
 
-    const allDone = items.every(function(item) { return item.done; });
+    const allDone = items.every(function(item) { return String(item.status).toLowerCase() === "completed"; });
 
     if (allDone) {
         return `<span class="checklist-dot checklist-dot-green" title="Checklist complete"></span>`;
@@ -2025,45 +2043,48 @@ function checklistStatusDot(entityKey) {
 
 }
 
-function addChecklistItem(entityKey, text) {
+async function addChecklistItem(entityKey, text) {
 
     const trimmed = String(text || "").trim();
     if (!trimmed) return;
 
-    const items = getChecklist(entityKey);
-
-    items.push({ id: generateLocalId("chk"), text: trimmed, done: false });
-
-    setChecklist(entityKey, items);
-
-}
-
-function toggleChecklistItem(entityKey, itemId) {
-
-    const items = getChecklist(entityKey);
-
-    const updated = items.map(function(item) {
-        if (item.id === itemId) {
-            return Object.assign({}, item, { done: !item.done });
-        }
-        return item;
+    await apiRequest("addChecklistItem", {
+        taskId: idFromEntityKey(entityKey),
+        item: trimmed,
+        updatedBy: currentUserLabel()
     });
 
-    setChecklist(entityKey, updated);
+    await loadAllChecklists();
 
 }
 
-function removeChecklistItem(entityKey, itemId) {
+async function toggleChecklistItem(entityKey, itemId) {
 
-    const items = getChecklist(entityKey).filter(function(item) { return item.id !== itemId; });
-    setChecklist(entityKey, items);
+    const item = getChecklist(entityKey).find(function(i) { return i.checklistId === itemId; });
+    if (!item) return;
+
+    const newStatus = String(item.status).toLowerCase() === "completed" ? "Pending" : "Completed";
+
+    await apiRequest("updateChecklistStatus", {
+        checklistId: itemId,
+        status: newStatus,
+        updatedBy: currentUserLabel()
+    });
+
+    await loadAllChecklists();
+
+}
+
+async function removeChecklistItem(entityKey, itemId) {
+
+    await apiRequest("deleteChecklistItem", { checklistId: itemId });
+    await loadAllChecklists();
 
 }
 
 /* Renders a checklist into any container, wiring up add/toggle/remove.
    `canEdit` controls whether items can be added/removed; toggling status
-   is allowed for anyone who can see the checklist (matches the rule that
-   any user with access may update checklist item status). */
+   is allowed for anyone who can see the checklist. */
 function renderChecklistInto(entityKey, listElement, formElement, inputElement, canEdit, onChange) {
 
     if (!listElement) return;
@@ -2075,28 +2096,31 @@ function renderChecklistInto(entityKey, listElement, formElement, inputElement, 
     } else {
 
         listElement.innerHTML = items.map(function(item) {
+
+            const done = String(item.status).toLowerCase() === "completed";
+
             return `
-                <div class="checklist-item ${item.done ? "is-done" : ""}" data-item-id="${escapeHtml(item.id)}">
-                    <input type="checkbox" ${item.done ? "checked" : ""} class="checklist-item-checkbox">
-                    <span class="checklist-item-text">${escapeHtml(item.text)}</span>
+                <div class="checklist-item ${done ? "is-done" : ""}" data-item-id="${escapeHtml(item.checklistId)}">
+                    <input type="checkbox" ${done ? "checked" : ""} class="checklist-item-checkbox">
+                    <span class="checklist-item-text">${escapeHtml(item.item)}</span>
                     ${canEdit ? `<button type="button" class="checklist-item-remove" aria-label="Remove item">×</button>` : ""}
                 </div>
             `;
         }).join("");
 
         listElement.querySelectorAll(".checklist-item-checkbox").forEach(function(checkbox) {
-            checkbox.addEventListener("change", function() {
+            checkbox.addEventListener("change", async function() {
                 const itemId = checkbox.closest(".checklist-item").dataset.itemId;
-                toggleChecklistItem(entityKey, itemId);
+                await toggleChecklistItem(entityKey, itemId);
                 if (onChange) onChange();
             });
         });
 
         if (canEdit) {
             listElement.querySelectorAll(".checklist-item-remove").forEach(function(button) {
-                button.addEventListener("click", function() {
+                button.addEventListener("click", async function() {
                     const itemId = button.closest(".checklist-item").dataset.itemId;
-                    removeChecklistItem(entityKey, itemId);
+                    await removeChecklistItem(entityKey, itemId);
                     if (onChange) onChange();
                 });
             });
@@ -2108,9 +2132,9 @@ function renderChecklistInto(entityKey, listElement, formElement, inputElement, 
 
         formElement.dataset.wired = "true";
 
-        formElement.addEventListener("submit", function(event) {
+        formElement.addEventListener("submit", async function(event) {
             event.preventDefault();
-            addChecklistItem(entityKey, inputElement.value);
+            await addChecklistItem(entityKey, inputElement.value);
             inputElement.value = "";
             if (onChange) onChange();
         });
@@ -2124,45 +2148,35 @@ function renderChecklistInto(entityKey, listElement, formElement, inputElement, 
 }
 
 /* ---------------------------------------------------------------------
-   COMMENTS  (entityKey e.g. "task:TASK-004", "backlog:bk-abc123")
+   COMMENTS  (entityKey e.g. "task:T004", "backlog:BL003")
 --------------------------------------------------------------------- */
 
-function getAllComments() {
-    return loadLocalStore(LOCAL_STORE_KEYS.comments) || {};
-}
-
 function getComments(entityKey) {
-    const all = getAllComments();
-    return Array.isArray(all[entityKey]) ? all[entityKey] : [];
+    return allComments[idFromEntityKey(entityKey)] || [];
 }
 
-function addComment(entityKey, text) {
+async function addComment(entityKey, text) {
 
     const trimmed = String(text || "").trim();
     if (!trimmed) return;
 
-    const all = getAllComments();
-    const list = Array.isArray(all[entityKey]) ? all[entityKey] : [];
-
-    list.push({
-        id: generateLocalId("cm"),
-        author: currentUser?.name || currentUser?.username || "User",
-        text: trimmed,
-        date: new Date().toISOString()
+    await apiRequest("addTaskComment", {
+        taskId: idFromEntityKey(entityKey),
+        comment: trimmed,
+        updatedBy: currentUserLabel()
     });
 
-    all[entityKey] = list;
-    saveLocalStore(LOCAL_STORE_KEYS.comments, all);
+    await loadAllComments();
 
 }
 
-function formatCommentDate(iso) {
+function formatCommentDate(comment) {
 
-    const date = new Date(iso);
-    if (isNaN(date.getTime())) return "";
+    if (comment.date && comment.time) {
+        return comment.date + " · " + comment.time;
+    }
 
-    return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " · " +
-           date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    return comment.date || "";
 
 }
 
@@ -2181,10 +2195,10 @@ function renderCommentsInto(entityKey, threadElement) {
         return `
             <div class="comment-bubble">
                 <div class="comment-bubble-head">
-                    <span class="comment-bubble-author">${escapeHtml(comment.author)}</span>
-                    <span class="comment-bubble-date">${escapeHtml(formatCommentDate(comment.date))}</span>
+                    <span class="comment-bubble-author">${escapeHtml(comment.user)}</span>
+                    <span class="comment-bubble-date">${escapeHtml(formatCommentDate(comment))}</span>
                 </div>
-                <div class="comment-bubble-text">${escapeHtml(comment.text)}</div>
+                <div class="comment-bubble-text">${escapeHtml(comment.comment)}</div>
             </div>
         `;
     }).join("");
@@ -2229,10 +2243,10 @@ function initializeTaskDetailDrawer() {
     const commentInput = document.getElementById("taskDetailCommentInput");
 
     if (commentForm) {
-        commentForm.addEventListener("submit", function(event) {
+        commentForm.addEventListener("submit", async function(event) {
             event.preventDefault();
             if (!taskDetailCurrentId) return;
-            addComment("task:" + taskDetailCurrentId, commentInput.value);
+            await addComment("task:" + taskDetailCurrentId, commentInput.value);
             commentInput.value = "";
             renderCommentsInto("task:" + taskDetailCurrentId, document.getElementById("taskDetailComments"));
         });
@@ -2324,7 +2338,7 @@ function updateChecklistProgressLabel(entityKey, progressElement) {
     if (!progressElement) return;
 
     const items = getChecklist(entityKey);
-    const done = items.filter(function(item) { return item.done; }).length;
+    const done = items.filter(function(item) { return String(item.status).toLowerCase() === "completed"; }).length;
 
     progressElement.textContent = done + "/" + items.length;
 
@@ -2405,14 +2419,6 @@ function closeTaskDetailDrawer() {
    BACKLOG
 ========================================================================= */
 
-function getBacklogItems() {
-    return loadLocalStore(LOCAL_STORE_KEYS.backlog) || [];
-}
-
-function setBacklogItems(items) {
-    saveLocalStore(LOCAL_STORE_KEYS.backlog, items);
-}
-
 function initializeBacklog() {
 
     const addButton = document.getElementById("backlogAddButton");
@@ -2435,9 +2441,9 @@ function initializeBacklog() {
     }
 
     if (form) {
-        form.addEventListener("submit", function(event) {
+        form.addEventListener("submit", async function(event) {
             event.preventDefault();
-            saveBacklogItemFromForm();
+            await saveBacklogItemFromForm();
         });
     }
 
@@ -2445,10 +2451,10 @@ function initializeBacklog() {
     const commentInput = document.getElementById("backlogDetailCommentInput");
 
     if (commentForm) {
-        commentForm.addEventListener("submit", function(event) {
+        commentForm.addEventListener("submit", async function(event) {
             event.preventDefault();
             if (!backlogDetailCurrentId) return;
-            addComment("backlog:" + backlogDetailCurrentId, commentInput.value);
+            await addComment("backlog:" + backlogDetailCurrentId, commentInput.value);
             commentInput.value = "";
             renderCommentsInto("backlog:" + backlogDetailCurrentId, document.getElementById("backlogDetailComments"));
             renderBacklog();
@@ -2467,10 +2473,10 @@ function openBacklogItemModal(item = null) {
     if (item) {
 
         title.textContent = "Edit Backlog Item";
-        setInput("editBacklogId", item.id);
-        setInput("backlogTitle", item.title);
+        setInput("editBacklogId", item.backlogId);
+        setInput("backlogTitle", item.task);
         setInput("backlogDepartment", item.department);
-        setInput("backlogStatus", item.status || "Backlog");
+        setInput("backlogStatus", item.status || "Future");
         setInput("backlogDescription", item.description);
 
     } else {
@@ -2479,7 +2485,7 @@ function openBacklogItemModal(item = null) {
         setInput("editBacklogId", "");
         setInput("backlogTitle", "");
         setInput("backlogDepartment", "");
-        setInput("backlogStatus", "Backlog");
+        setInput("backlogStatus", "Future");
         setInput("backlogDescription", "");
 
     }
@@ -2498,7 +2504,7 @@ function closeBacklogItemModal() {
 
 }
 
-function saveBacklogItemFromForm() {
+async function saveBacklogItemFromForm() {
 
     const editId = getInput("editBacklogId");
     const title = getInput("backlogTitle").trim();
@@ -2508,40 +2514,24 @@ function saveBacklogItemFromForm() {
         return;
     }
 
-    const items = getBacklogItems();
+    const payload = {
+        task: title,
+        department: getInput("backlogDepartment"),
+        status: getInput("backlogStatus") || "Future",
+        description: getInput("backlogDescription"),
+        updatedBy: currentUserLabel()
+    };
 
-    if (editId) {
+    const result = editId
+        ? await apiRequest("updateBacklogTask", Object.assign({ backlogId: editId }, payload))
+        : await apiRequest("createBacklogTask", payload);
 
-        const updated = items.map(function(item) {
-
-            if (item.id !== editId) return item;
-
-            return Object.assign({}, item, {
-                title: title,
-                department: getInput("backlogDepartment"),
-                status: getInput("backlogStatus"),
-                description: getInput("backlogDescription")
-            });
-
-        });
-
-        setBacklogItems(updated);
-
-    } else {
-
-        items.push({
-            id: generateLocalId("bk"),
-            title: title,
-            department: getInput("backlogDepartment"),
-            status: getInput("backlogStatus") || "Backlog",
-            description: getInput("backlogDescription"),
-            createdDate: todayInput(),
-            createdBy: currentUser?.name || currentUser?.username || "User"
-        });
-
-        setBacklogItems(items);
-
+    if (!result || !result.success) {
+        showNotification("Error", (result && result.message) || "Unable to save backlog item.");
+        return;
     }
+
+    await loadBacklogTasks();
 
     closeBacklogItemModal();
     showNotification("Saved", "Backlog item saved.");
@@ -2554,8 +2544,7 @@ function renderBacklog() {
     const grid = document.getElementById("backlogGrid");
     if (!grid) return;
 
-    const items = getBacklogItems();
-    const ordered = sortMineFirst(items, function(item) { return item.createdBy; });
+    const ordered = sortMineFirst(backlogTasks, function(item) { return item.createdBy; });
 
     if (!ordered.length) {
         grid.innerHTML = `<div class="empty-state">No backlog items yet. Add future or paused work to keep track of it here.</div>`;
@@ -2564,16 +2553,16 @@ function renderBacklog() {
 
     grid.innerHTML = ordered.map(function(item) {
 
-        const commentCount = getComments("backlog:" + item.id).length;
-        const statusClass = String(item.status || "Backlog").toLowerCase() === "paused" ? "status-paused" : "status-backlog";
+        const commentCount = getComments("backlog:" + item.backlogId).length;
+        const statusClass = String(item.status || "Future").toLowerCase() === "paused" ? "status-paused" : "status-backlog";
 
         return `
-            <div class="backlog-card" data-id="${escapeHtml(item.id)}">
+            <div class="backlog-card" data-id="${escapeHtml(item.backlogId)}">
                 <div class="backlog-card-top">
-                    <span class="backlog-status-chip ${statusClass}">${escapeHtml(item.status || "Backlog")}</span>
-                    ${isPrivilegedUser() ? `<button type="button" class="table-action backlog-edit-button" data-id="${escapeHtml(item.id)}">Edit</button>` : ""}
+                    <span class="backlog-status-chip ${statusClass}">${escapeHtml(item.status || "Future")}</span>
+                    ${isPrivilegedUser() ? `<button type="button" class="table-action backlog-edit-button" data-id="${escapeHtml(item.backlogId)}">Edit</button>` : ""}
                 </div>
-                <h3>${escapeHtml(item.title)}</h3>
+                <h3>${escapeHtml(item.task)}</h3>
                 <p class="backlog-card-description">${escapeHtml(item.description || "No description yet.")}</p>
                 <div class="backlog-card-footer">
                     <span>${escapeHtml(item.department || "Unassigned")} · ${escapeHtml(displayDate(item.createdDate))}</span>
@@ -2594,7 +2583,7 @@ function renderBacklog() {
     grid.querySelectorAll(".backlog-edit-button").forEach(function(button) {
         button.addEventListener("click", function(event) {
             event.stopPropagation();
-            const item = getBacklogItems().find(function(i) { return i.id === button.dataset.id; });
+            const item = backlogTasks.find(function(i) { return i.backlogId === button.dataset.id; });
             if (item) openBacklogItemModal(item);
         });
     });
@@ -2603,13 +2592,13 @@ function renderBacklog() {
 
 function openBacklogDetailDrawer(id) {
 
-    const item = getBacklogItems().find(function(i) { return i.id === id; });
+    const item = backlogTasks.find(function(i) { return i.backlogId === id; });
     if (!item) return;
 
     backlogDetailCurrentId = id;
 
-    setText("backlogDetailStatusLabel", (item.status || "Backlog").toUpperCase());
-    setText("backlogDetailTitle", item.title);
+    setText("backlogDetailStatusLabel", (item.status || "Future").toUpperCase());
+    setText("backlogDetailTitle", item.task);
     setText("backlogDetailCreatedDate", displayDate(item.createdDate));
     setText("backlogDetailDepartment", item.department ? "· " + item.department : "");
     setText("backlogDetailDescription", item.description || "No description yet.");
