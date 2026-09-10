@@ -121,6 +121,10 @@
                 <span class="nav-icon">◆</span><span>Book Fair</span>
             </button>
 
+            <button class="nav-item" data-page="jira">
+                <span class="nav-icon">◈</span><span>Jira</span>
+            </button>
+
             <div class="navigation-title">DEPARTMENTS</div>
 
             <button class="nav-item department-item" data-department="B2B - Sales">
@@ -397,6 +401,33 @@
                 </div>
                 <div id="bookFairGrid" class="bookfair-grid">
                     <div class="empty-state">Loading Book Fair tasks...</div>
+                </div>
+            </section>
+
+            <!-- JIRA -->
+            <section id="jiraPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">EXTERNAL</span>
+                        <h2>Jira</h2>
+                        <p>Live issues pulled directly from your connected Jira project.</p>
+                    </div>
+                    <button id="jiraRefreshButton" class="secondary-button" type="button">⟳ Refresh</button>
+                </div>
+
+                <div class="filter-panel">
+                    <div class="filter-field">
+                        <label for="jiraStatusFilter">Status</label>
+                        <select id="jiraStatusFilter"><option value="">All Statuses</option></select>
+                    </div>
+                    <div class="filter-field">
+                        <label for="jiraSearch">Search</label>
+                        <input type="search" id="jiraSearch" placeholder="Search issues...">
+                    </div>
+                </div>
+
+                <div id="jiraGrid" class="bookfair-grid">
+                    <div class="empty-state">Loading Jira issues...</div>
                 </div>
             </section>
 
