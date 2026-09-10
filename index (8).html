@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Excelso — Operations Management</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+    <!-- Logo is needed immediately on both the login screen and sidebar,
+         so preload it instead of letting the browser discover it late
+         from inside the CSS/HTML parse. -->
+    <link rel="preload" as="image" href="assets/logo-usedbookr.png">
+</head>
+<body>
+
+<!-- PAGE LOADER -->
+<div id="pageLoader" class="page-loader">
+    <div class="loader-scene">
+        <div class="loader-book">
+            <div class="loader-page loader-page-1"></div>
+            <div class="loader-page loader-page-2"></div>
+            <div class="loader-page loader-page-3"></div>
+            <div class="loader-spine"></div>
+        </div>
+        <div class="loader-leaf loader-leaf-a"></div>
+        <div class="loader-leaf loader-leaf-b"></div>
+        <div class="loader-leaf loader-leaf-c"></div>
+    </div>
+    <div class="loader-word"><span>EXCEL</span><span class="loader-word-accent">SO</span></div>
+    <p class="loader-caption">Preparing your operations desk…</p>
+</div>
+
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" class="login-screen">
+    <div class="login-aurora"></div>
+    <div class="login-main">
+
+        <div class="login-card">
+            <div class="login-brand">
+                <div class="logo-mark"><img src="assets/logo-usedbookr.png" alt="UsedBookR" decoding="async" fetchpriority="high"></div>
+                <h1>Excelso</h1>
+                <p>UsedBookR/Simply Sell Books Operations Tracker</p>
+            </div>
+
+            <div class="login-divider"></div>
+
+            <h2>Operations Login</h2>
+            <p class="login-description">Centralized system for tracking, monitoring and managing all departmental operations.</p>
+
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="loginUsername">Username</label>
+                    <div class="input-shell">
+                        <input type="text" id="loginUsername" name="username" placeholder="Enter username" autocomplete="username" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <div class="input-shell">
+                        <input type="password" id="loginPassword" name="password" placeholder="Enter password" autocomplete="current-password" required>
+                    </div>
+                </div>
+
+                <div id="loginError" class="login-error">Incorrect username or password. Please try again.</div>
+
+                <button type="submit" class="login-button">
+                    <span class="login-button-label">Sign In</span>
+                    <span class="login-button-spinner" aria-hidden="true"></span>
+                </button>
+            </form>
+
+            <div class="login-footer">Authorized Operations Access</div>
+        </div>
+    </div>
+</div>
+
+<!-- APPLICATION -->
+<div id="app" class="app" style="display:none;">
+
+    <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo"><img src="assets/logo-usedbookr.png" alt="UsedBookR" decoding="async" fetchpriority="high"></div>
+            <div class="sidebar-brand">
+                <strong>Excelso</strong>
+                <span>UsedBookR/Simply Sell Books Operations Tracker</span>
+            </div>
+        </div>
+
+        <nav class="sidebar-navigation">
+            <div class="navigation-title">MAIN</div>
+
+            <button class="nav-item active" data-page="dashboard">
+                <span class="nav-icon">▦</span><span>Dashboard</span>
+            </button>
+
+            <button class="nav-item" data-page="tasks">
+                <span class="nav-icon">✓</span><span>All Tasks</span>
+            </button>
+
+            <button class="nav-item" data-page="regularTasks">
+                <span class="nav-icon">↺</span><span>Regular Tasks</span>
+            </button>
+
+            <button class="nav-item" data-page="followups">
+                <span class="nav-icon">↻</span><span>Follow-ups</span>
+            </button>
+
+            <button class="nav-item" data-page="backlog">
+                <span class="nav-icon">▤</span><span>Backlog</span>
+            </button>
+
+            <button class="nav-item" data-page="bookFair">
+                <span class="nav-icon">◆</span><span>Book Fair</span>
+            </button>
+
+            <div class="navigation-title">DEPARTMENTS</div>
+
+            <button class="nav-item department-item" data-department="B2B - Sales">
+                <span class="department-code">B2B</span><span>B2B / Sales</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Customer Support">
+                <span class="department-code">CS</span><span>Customer Support</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Warehouse">
+                <span class="department-code">WH</span><span>Warehouse</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Scanning - Catalog">
+                <span class="department-code">SC</span><span>Scanning / Catalog</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Listing - Inventory">
+                <span class="department-code">LI</span><span>Listing / Inventory</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Digital Marketing">
+                <span class="department-code">DM</span><span>Digital Marketing</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="IT - Software Development">
+                <span class="department-code">IT</span><span>IT / Software Development</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Finance">
+                <span class="department-code">FN</span><span>Finance</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Book Fair - Events">
+                <span class="department-code">BF</span><span>Book Fair / Events</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Books and Supply Procurement">
+                <span class="department-code">BP</span><span>Books & Supply Procurement</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="HR">
+                <span class="department-code">HR</span><span>HR</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Data Analysis">
+                <span class="department-code">DA</span><span>Data Analysis</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Software Testing">
+                <span class="department-code">ST</span><span>Software Testing</span>
+            </button>
+
+            <button class="nav-item department-item" data-department="Product Development">
+                <span class="department-code">PD</span><span>Product Development</span>
+            </button>
+
+            <button class="nav-item" data-page="activity">
+                <span class="nav-icon">◷</span><span>Activity Log</span>
+            </button>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="logged-user">
+                <div id="loggedUserAvatar" class="user-avatar">OT</div>
+                <div class="user-details">
+                    <strong id="loggedUserName">Operations Tracker</strong>
+                    <span id="loggedUserRole">UsedBookR/SimplySellBooks</span>
+                </div>
+            </div>
+            <button id="logoutButton" class="logout-button">
+                <span aria-hidden="true">&#10148;</span> Logout
+            </button>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <header class="topbar">
+            <div class="topbar-left">
+                <button id="menuToggle" class="menu-toggle" type="button" aria-label="Toggle navigation">
+                    <span></span><span></span><span></span>
+                </button>
+                <div>
+                    <h1 id="pageTitle">Operations Dashboard</h1>
+                    <p id="pageSubtitle">Centralized operational monitoring</p>
+                </div>
+            </div>
+            <div class="topbar-right">
+                <span id="currentDate">--</span>
+                <button id="topAddTask" class="top-add-button" type="button"><span aria-hidden="true">+</span> Add Task</button>
+            </div>
+        </header>
+
+        <div class="content-area">
+
+            <!-- DASHBOARD -->
+            <section id="dashboardPage" class="page active-page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">OVERVIEW</span>
+                        <h2>Operations Dashboard</h2>
+                        <p>Monitor tasks, priorities, follow-ups and performance across all 14 departments.</p>
+                    </div>
+                    <button id="dashboardAddTask" class="primary-button" type="button">+ Add New Task</button>
+                </div>
+
+                <div class="kpi-grid">
+                    <div class="kpi-card kpi-total"><span>Total Tasks</span><strong id="totalTasks">0</strong><small>All departments</small></div>
+                    <div class="kpi-card kpi-open"><span>Open</span><strong id="openTasks">0</strong><small>Not started</small></div>
+                    <div class="kpi-card kpi-progress"><span>In Progress</span><strong id="progressTasks">0</strong><small>Currently working</small></div>
+                    <div class="kpi-card kpi-blocked"><span>Blocked</span><strong id="blockedTasks">0</strong><small>Need attention</small></div>
+                    <div class="kpi-card kpi-overdue"><span>Overdue</span><strong id="overdueTasks">0</strong><small>Past due date</small></div>
+                    <div class="kpi-card kpi-completed"><span>Completed</span><strong id="completedTasks">0</strong><small>Closed tasks</small></div>
+                </div>
+
+                <div class="dashboard-columns">
+                    <div class="panel">
+                        <div class="panel-header"><div><h3>Priority Overview</h3><p>Tasks requiring attention</p></div></div>
+                        <div class="priority-list">
+                            <div><span><i class="priority-dot priority-dot-high"></i>High Priority</span><strong id="highPriorityCount">0</strong></div>
+                            <div><span><i class="priority-dot priority-dot-medium"></i>Medium Priority</span><strong id="mediumPriorityCount">0</strong></div>
+                            <div><span><i class="priority-dot priority-dot-low"></i>Low Priority</span><strong id="lowPriorityCount">0</strong></div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header"><div><h3>Follow-up Monitoring</h3><p>Actions requiring attention</p></div></div>
+                        <div class="followup-summary">
+                            <div><strong id="followupsToday">0</strong><span>Due Today</span></div>
+                            <div><strong id="followupsOverdue">0</strong><span>Overdue</span></div>
+                            <div><strong id="followupsUpcoming">0</strong><span>Upcoming</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header"><div><h3>Recent Tasks</h3><p>Latest operational updates</p></div></div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th></tr></thead>
+                            <tbody id="recentTasksTable"><tr><td colspan="7" class="empty-table">Loading tasks...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="panel ecosystem-panel">
+                    <div class="ecosystem-copy">
+                        <span class="page-label">THE ECOSYSTEM</span>
+                        <h3>One loop, two storefronts</h3>
+                        <p>Excelso is the operational backbone connecting UsedbookR.com and SimplySellBooks — every task logged here keeps books moving from buy to resell and back again.</p>
+                    </div>
+                    <div class="ecosystem-image">
+                        <img src="assets/logo-cycle.png" alt="Buy, Read, Resell, Repeat — UsedBookR and SimplySellBooks ecosystem">
+                    </div>
+                </div>
+            </section>
+
+            <!-- REGULAR TASKS -->
+            <section id="regularTasksPage" class="page" data-page="regularTasks">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">RECURRING WORK</span>
+                        <h2>Regular Tasks</h2>
+                        <p>Complete and update your recurring operational tasks.</p>
+                    </div>
+                </div>
+                <div id="regularTasksContainer" class="regular-tasks-container">
+                    <div class="regular-tasks-loading">Loading regular tasks...</div>
+                </div>
+            </section>
+
+            <!-- ALL TASKS -->
+            <section id="tasksPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">TASK MANAGEMENT</span>
+                        <h2>All Tasks</h2>
+                        <p>Manage tasks across all departments.</p>
+                    </div>
+                    <div class="page-header-actions">
+                        <button id="exportTasksButton" class="secondary-button" type="button">⭳ Export CSV</button>
+                        <button id="tasksAddButton" class="primary-button" type="button">+ Add New Task</button>
+                    </div>
+                </div>
+
+                <div class="filter-panel">
+                    <div class="filter-field"><label for="taskSearch">Search</label><input type="search" id="taskSearch" placeholder="Search tasks..."></div>
+                    <div class="filter-field"><label for="departmentFilter">Department</label><select id="departmentFilter"><option value="">All Departments</option></select></div>
+                    <div class="filter-field">
+                        <label for="priorityFilter">Priority</label>
+                        <select id="priorityFilter">
+                            <option value="">All Priorities</option>
+                            <option value="High">High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                        </select>
+                    </div>
+                    <div class="filter-field">
+                        <label for="statusFilter">Status</label>
+                        <select id="statusFilter">
+                            <option value="">All Statuses</option>
+                            <option value="Open">Open</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Blocked">Blocked</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Overdue">Overdue</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Checklist</th><th>Actions</th></tr></thead>
+                            <tbody id="allTasksTable"><tr><td colspan="9" class="empty-table">Loading tasks...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- FOLLOW UPS -->
+            <section id="followupsPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">MONITORING</span>
+                        <h2>Follow-ups</h2>
+                        <p>Monitor commitments and pending actions.</p>
+                    </div>
+                </div>
+                <div class="followup-dashboard">
+                    <div class="followup-card"><span>Due Today</span><strong id="followupPageToday">0</strong></div>
+                    <div class="followup-card"><span>Overdue</span><strong id="followupPageOverdue">0</strong></div>
+                    <div class="followup-card"><span>Upcoming</span><strong id="followupPageUpcoming">0</strong></div>
+                </div>
+                <div class="panel">
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Follow-up Date</th><th>Last Action</th><th>Status</th></tr></thead>
+                            <tbody id="followupsTable"><tr><td colspan="7" class="empty-table">Loading follow-ups...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- BACKLOG -->
+            <section id="backlogPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">FUTURE / PAUSED WORK</span>
+                        <h2>Backlog</h2>
+                        <p>Future and paused tasks parked for later, with discussion in comments.</p>
+                    </div>
+                    <button type="button" class="primary-button" id="backlogAddButton">+ Add Backlog Item</button>
+                </div>
+                <div class="filter-panel">
+                    <div class="filter-field"><label for="backlogDepartmentFilter">Department</label><select id="backlogDepartmentFilter"><option value="">All Departments</option></select></div>
+                </div>
+                <div id="backlogGrid" class="backlog-grid">
+                    <div class="empty-state">Loading backlog...</div>
+                </div>
+            </section>
+
+            <!-- BOOK FAIR -->
+            <section id="bookFairPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">EVENTS</span>
+                        <h2>Book Fair</h2>
+                        <p>Book Fair / Events tasks — priority tasks appear first, each with its own checklist.</p>
+                    </div>
+                    <button id="bookFairAddButton" class="primary-button" type="button">+ Add Task</button>
+                </div>
+                <div id="bookFairGrid" class="bookfair-grid">
+                    <div class="empty-state">Loading Book Fair tasks...</div>
+                </div>
+            </section>
+
+            <!-- DEPARTMENT LIST -->
+            <section id="departmentsPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">ORGANIZATION</span>
+                        <h2>Departments</h2>
+                        <p>All 14 departments and their operational workload.</p>
+                    </div>
+                </div>
+                <div id="departmentsGrid" class="departments-grid"></div>
+            </section>
+
+            <!-- DEPARTMENT DETAIL -->
+            <section id="departmentDetailPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span id="departmentDetailCode" class="page-label">DEPARTMENT</span>
+                        <h2 id="departmentDetailTitle">Department</h2>
+                        <p id="departmentDetailSubtitle">Department operational overview.</p>
+                    </div>
+                    <button id="departmentAddTaskButton" class="primary-button" type="button">+ Add Task</button>
+                </div>
+
+                <div class="kpi-grid">
+                    <div class="kpi-card"><span>Total Tasks</span><strong id="departmentTotal">0</strong></div>
+                    <div class="kpi-card"><span>Open</span><strong id="departmentOpen">0</strong></div>
+                    <div class="kpi-card"><span>In Progress</span><strong id="departmentProgress">0</strong></div>
+                    <div class="kpi-card"><span>Blocked</span><strong id="departmentBlocked">0</strong></div>
+                    <div class="kpi-card"><span>Overdue</span><strong id="departmentOverdue">0</strong></div>
+                    <div class="kpi-card"><span>Completed</span><strong id="departmentCompleted">0</strong></div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header"><div><h3>Department Tasks</h3><p>Tasks assigned to this department.</p></div></div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>ID</th><th>Task</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Follow-up</th><th>Checklist</th><th>Action</th></tr></thead>
+                            <tbody id="departmentTasksTable"><tr><td colspan="9" class="empty-table">Loading tasks...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ACTIVITY LOG -->
+            <section id="activityPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">AUDIT TRAIL</span>
+                        <h2>Activity Log</h2>
+                        <p>Track task changes and follow-up actions.</p>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div id="activityTimeline" class="activity-timeline">
+                        <div class="empty-state">Loading activity...</div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<!-- TASK MODAL -->
+<div id="taskModal" class="modal-overlay" style="display:none;">
+    <div class="modal">
+        <div class="modal-header">
+            <div><span class="modal-label">TASK</span><h2 id="taskModalTitle">Add New Task</h2></div>
+            <button id="closeTaskModal" class="modal-close" type="button" aria-label="Close">×</button>
+        </div>
+
+        <form id="taskForm">
+            <input type="hidden" id="editTaskId">
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="taskName">Task *</label>
+                    <input type="text" id="taskName" placeholder="Enter task" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="taskDepartment">Department *</label>
+                    <select id="taskDepartment" required><option value="">Select Department</option></select>
+                </div>
+
+                <div class="form-group">
+                    <label for="taskAssignedTo">Assigned To *</label>
+                    <input type="text" id="taskAssignedTo" placeholder="Responsible person" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="taskPriority">Priority *</label>
+                    <select id="taskPriority" required>
+                        <option value="High">High</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="taskStatus">Status *</label>
+                    <select id="taskStatus" required>
+                        <option value="Open">Open</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Blocked">Blocked</option>
+                        <option value="Completed">Completed</option>
+                    </select>
+                </div>
+
+                <div class="form-group"><label for="taskCreatedDate">Created Date</label><input type="date" id="taskCreatedDate"></div>
+                <div class="form-group"><label for="taskDueDate">Due Date *</label><input type="date" id="taskDueDate" required></div>
+                <div class="form-group"><label for="taskFollowupDate">Follow-up Date</label><input type="date" id="taskFollowupDate"></div>
+
+                <div class="form-group full-width">
+                    <label for="taskFollowupAction">Follow-up / Action Taken</label>
+                    <textarea id="taskFollowupAction" rows="4" placeholder="Record calls, messages, meetings or actions taken..."></textarea>
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="taskRemarks">Remarks</label>
+                    <textarea id="taskRemarks" rows="4" placeholder="Additional information, dependencies or notes..."></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" id="cancelTaskButton" class="secondary-button">Cancel</button>
+                <button type="submit" class="primary-button">Save Task</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- REGULAR TASK UPDATE MODAL -->
+<div id="regularTaskUpdateModal" class="regular-task-update-modal" style="display: none;">
+    <div class="regular-task-update-modal-overlay" onclick="closeRegularTaskUpdate()"></div>
+
+    <div class="regular-task-update-modal-card">
+        <div class="regular-task-update-modal-header">
+            <div><h2>Update Regular Task</h2><p id="regularTaskUpdateTaskName">Regular Task</p></div>
+            <button type="button" class="regular-task-update-close" onclick="closeRegularTaskUpdate()">×</button>
+        </div>
+
+        <div class="regular-task-update-info">
+            <div><span>Task ID</span><strong id="regularTaskUpdateTaskId">-</strong></div>
+            <div><span>Department</span><strong id="regularTaskUpdateDepartment">-</strong></div>
+            <div><span>Expected Time</span><strong id="regularTaskUpdateExpectedTime">-</strong></div>
+        </div>
+
+        <form id="regularTaskUpdateForm">
+            <div class="form-group">
+                <label for="regularTaskStatus">Status</label>
+                <select id="regularTaskStatus" required>
+                    <option value="">Select status</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Pending">Pending</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="regularTaskDescription">Description</label>
+                <textarea id="regularTaskDescription" rows="5" placeholder="Enter your update or remarks..." required></textarea>
+            </div>
+
+            <div id="regularTaskUpdateError" class="regular-task-update-error"></div>
+
+            <div class="regular-task-update-actions">
+                <button type="button" class="secondary-button" onclick="closeRegularTaskUpdate()">Cancel</button>
+                <button type="submit" class="primary-button" id="saveRegularTaskUpdateButton">Save Update</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- TASK DETAIL DRAWER (All Tasks / Master Tasks / Book Fair) -->
+<div id="taskDetailDrawer" class="detail-drawer" style="display:none;">
+    <div class="detail-drawer-overlay" onclick="closeTaskDetailDrawer()"></div>
+    <div class="detail-drawer-panel">
+        <button type="button" class="detail-drawer-close" onclick="closeTaskDetailDrawer()" aria-label="Close">×</button>
+
+        <div class="detail-drawer-body">
+
+            <div class="detail-drawer-main">
+                <span class="page-label">TASK</span>
+                <h2 id="taskDetailName">Task name</h2>
+
+                <div class="detail-drawer-field">
+                    <label>Description</label>
+                    <textarea id="taskDetailDescription" rows="3" placeholder="No description yet."></textarea>
+                </div>
+
+                <div class="detail-drawer-checklist">
+                    <div class="detail-drawer-section-header">
+                        <h3>Checklist</h3>
+                        <span id="taskDetailChecklistProgress" class="checklist-progress">0/0</span>
+                    </div>
+                    <div id="taskDetailChecklistList" class="checklist-list"></div>
+                    <form id="taskDetailChecklistForm" class="checklist-add-form">
+                        <input type="text" id="taskDetailChecklistInput" placeholder="Add checklist item...">
+                        <button type="submit">+ Add</button>
+                    </form>
+                </div>
+
+                <div class="detail-drawer-comments">
+                    <h3>Comments</h3>
+                    <div id="taskDetailComments" class="comment-thread"></div>
+                    <form id="taskDetailCommentForm" class="comment-form">
+                        <textarea id="taskDetailCommentInput" rows="2" placeholder="Add a comment..." required></textarea>
+                        <button type="submit" class="primary-button">Post Comment</button>
+                    </form>
+                </div>
+            </div>
+
+            <aside class="detail-drawer-meta">
+                <span class="page-label">DETAILS</span>
+
+                <div class="meta-field">
+                    <label>Task ID</label>
+                    <input type="text" id="taskDetailId" disabled>
+                </div>
+                <div class="meta-field">
+                    <label>Department</label>
+                    <input type="text" id="taskDetailDepartment" disabled>
+                </div>
+                <div class="meta-field">
+                    <label>Assigned To</label>
+                    <input type="text" id="taskDetailAssignedTo">
+                </div>
+                <div class="meta-field">
+                    <label>Priority</label>
+                    <select id="taskDetailPriority">
+                        <option value="High">High</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                </div>
+                <div class="meta-field">
+                    <label>Status</label>
+                    <select id="taskDetailStatus">
+                        <option value="Open">Open</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Blocked">Blocked</option>
+                        <option value="Completed">Completed</option>
+                    </select>
+                    <small class="meta-field-hint">Anyone with access can update status.</small>
+                </div>
+                <div class="meta-field">
+                    <label>Created Date</label>
+                    <input type="date" id="taskDetailCreatedDate" disabled>
+                </div>
+                <div class="meta-field">
+                    <label>Due Date</label>
+                    <input type="date" id="taskDetailDueDate">
+                </div>
+                <div class="meta-field">
+                    <label>Follow-up Date</label>
+                    <input type="date" id="taskDetailFollowupDate">
+                </div>
+
+                <button type="button" id="taskDetailSaveMetaButton" class="primary-button" style="display:none;">Save Changes</button>
+                <p id="taskDetailLockedNote" class="meta-locked-note">Only the Operations Head / Founder can edit assignment, priority and dates.</p>
+            </aside>
+
+        </div>
+    </div>
+</div>
+
+<!-- BACKLOG ITEM MODAL -->
+<div id="backlogItemModal" class="modal-overlay" style="display:none;">
+    <div class="modal">
+        <div class="modal-header">
+            <div><span class="modal-label">BACKLOG</span><h2 id="backlogModalTitle">Add Backlog Item</h2></div>
+            <button id="closeBacklogModal" class="modal-close" type="button" aria-label="Close">×</button>
+        </div>
+
+        <form id="backlogItemForm">
+            <input type="hidden" id="editBacklogId">
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="backlogTitle">Title *</label>
+                    <input type="text" id="backlogTitle" placeholder="Enter backlog item title" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="backlogDepartment">Department</label>
+                    <select id="backlogDepartment"><option value="">Unassigned</option></select>
+                </div>
+
+                <div class="form-group">
+                    <label for="backlogStatus">Status</label>
+                    <select id="backlogStatus">
+                        <option value="Backlog">Backlog (future)</option>
+                        <option value="Paused">Paused</option>
+                    </select>
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="backlogDescription">Description</label>
+                    <textarea id="backlogDescription" rows="4" placeholder="What is this task, and why is it parked?"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" id="cancelBacklogButton" class="secondary-button">Cancel</button>
+                <button type="submit" class="primary-button" id="saveBacklogItemButton">Save Item</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- BACKLOG DETAIL DRAWER -->
+<div id="backlogDetailDrawer" class="detail-drawer" style="display:none;">
+    <div class="detail-drawer-overlay" onclick="closeBacklogDetailDrawer()"></div>
+    <div class="detail-drawer-panel detail-drawer-panel-single">
+        <button type="button" class="detail-drawer-close" onclick="closeBacklogDetailDrawer()" aria-label="Close">×</button>
+
+        <div class="detail-drawer-body detail-drawer-body-single">
+            <div class="detail-drawer-main">
+                <span id="backlogDetailStatusLabel" class="page-label">BACKLOG</span>
+                <h2 id="backlogDetailTitle">Backlog item</h2>
+                <p class="detail-drawer-meta-line">
+                    Created <strong id="backlogDetailCreatedDate">-</strong>
+                    <span id="backlogDetailDepartment"></span>
+                </p>
+                <p id="backlogDetailDescription" class="detail-drawer-static-description">-</p>
+
+                <div class="detail-drawer-comments">
+                    <h3>Comments</h3>
+                    <div id="backlogDetailComments" class="comment-thread"></div>
+                    <form id="backlogDetailCommentForm" class="comment-form">
+                        <textarea id="backlogDetailCommentInput" rows="2" placeholder="Add a comment..." required></textarea>
+                        <button type="submit" class="primary-button">Post Comment</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- NOTIFICATION -->
+<div id="notification" class="notification">
+    <div class="notification-icon" aria-hidden="true">✓</div>
+    <div class="notification-body">
+        <strong id="notificationTitle">Notification</strong>
+        <span id="notificationMessage">--</span>
+    </div>
+</div>
+
+<!-- ACTION LOADER (mini mascot shown while saving) -->
+<div id="actionLoader" class="action-loader" aria-live="polite">
+    <div class="action-loader-mascot">
+        <div class="action-loader-page action-loader-page-1"></div>
+        <div class="action-loader-page action-loader-page-2"></div>
+        <div class="action-loader-spine"></div>
+    </div>
+    <span id="actionLoaderText">Saving…</span>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
