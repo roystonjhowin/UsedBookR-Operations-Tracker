@@ -25,6 +25,7 @@ const DEPARTMENTS = [
 
 let tasks = [];
 let regularTasks = [];
+let jiraIssues = [];
 let currentDepartment = "";
 let currentPage = "dashboard";
 let editingTaskId = "";
@@ -78,6 +79,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     initializeBacklog();
     initializeBookFair();
+    initializeJira();
     initializeTaskDetailDrawer();
     initializeAllTasksTableDelegation();
 
@@ -553,6 +555,7 @@ function showPage(page) {
     if (page === "activity") renderActivity();
     if (page === "backlog") renderBacklog();
     if (page === "bookFair") renderBookFair();
+    if (page === "jira") renderJira();
 
 }
 
@@ -569,6 +572,7 @@ function updatePageHeader(page) {
         activity: ["Activity Log", "Track operational changes"],
         backlog: ["Backlog", "Future and paused tasks parked for later"],
         bookFair: ["Book Fair", "Priority tasks and checklists for Book Fair / Events"],
+        jira: ["Jira", "Live issues pulled from your connected Jira project"],
     };
 
     if (names[page]) {
@@ -3212,6 +3216,161 @@ function renderBookFair() {
             const card = clickable.closest(".bookfair-card");
             openTaskDetailDrawer(card.dataset.id);
         });
+    });
+
+}
+
+/* =========================================================================
+   JIRA
+   Pulls issues from Jira via the Apps Script "getJiraIssues" endpoint
+   (see backend). Cached server-side for 2 min, so refreshing here is
+   cheap. Cards reuse the Book Fair card layout for visual consistency.
+========================================================================= */
+
+function initializeJira() {
+
+    const refreshButton = document.getElementById("jiraRefreshButton");
+    const statusFilter = document.getElementById("jiraStatusFilter");
+    const search = document.getElementById("jiraSearch");
+
+    if (refreshButton) {
+        refreshButton.addEventListener("click", function () {
+            renderJira(true);
+        });
+    }
+
+    if (statusFilter) {
+        statusFilter.addEventListener("change", drawJiraGrid);
+    }
+
+    if (search) {
+        search.addEventListener("input", debounce(drawJiraGrid, 150));
+    }
+
+}
+
+async function loadJiraIssues() {
+
+    try {
+
+        const response = await fetch(API_URL + "?action=getJiraIssues");
+
+        if (!response.ok) throw new Error("HTTP " + response.status);
+
+        const result = await response.json();
+
+        if (result.success) {
+            jiraIssues = result.issues || [];
+        } else {
+            jiraIssues = [];
+            showNotification("Jira Error", result.message || "Unable to load Jira issues.");
+        }
+
+    }
+    catch (error) {
+
+        console.error("Jira fetch error:", error);
+        jiraIssues = [];
+        showNotification("Connection Error", "Unable to reach Jira right now.");
+
+    }
+
+}
+
+function populateJiraStatusFilter() {
+
+    const select = document.getElementById("jiraStatusFilter");
+    if (!select) return;
+
+    const current = select.value;
+
+    const statuses = Array.from(new Set(jiraIssues.map(function (issue) { return issue.status; }).filter(Boolean)));
+
+    select.innerHTML =
+        '<option value="">All Statuses</option>' +
+        statuses.map(function (status) {
+            return `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`;
+        }).join("");
+
+    if (statuses.includes(current)) {
+        select.value = current;
+    }
+
+}
+
+async function renderJira(forceReload) {
+
+    const grid = document.getElementById("jiraGrid");
+    if (!grid) return;
+
+    if (forceReload || !jiraIssues.length) {
+        grid.innerHTML = '<div class="empty-state">Loading Jira issues...</div>';
+        await loadJiraIssues();
+        populateJiraStatusFilter();
+    }
+
+    drawJiraGrid();
+
+}
+
+function drawJiraGrid() {
+
+    const grid = document.getElementById("jiraGrid");
+    if (!grid) return;
+
+    const statusFilter = (document.getElementById("jiraStatusFilter") || {}).value || "";
+    const searchTerm = ((document.getElementById("jiraSearch") || {}).value || "").trim().toLowerCase();
+
+    const filtered = jiraIssues.filter(function (issue) {
+
+        if (statusFilter && issue.status !== statusFilter) return false;
+
+        if (searchTerm) {
+            const haystack = (issue.key + " " + issue.summary + " " + issue.assignee).toLowerCase();
+            if (haystack.indexOf(searchTerm) === -1) return false;
+        }
+
+        return true;
+
+    });
+
+    grid.innerHTML = "";
+
+    if (!filtered.length) {
+        grid.innerHTML = '<div class="empty-state">No Jira issues found.</div>';
+        return;
+    }
+
+    batchRows(grid, filtered, function (issue) {
+
+        const priorityClass = "priority-border-" + String(issue.priority || "").toLowerCase();
+        const statusSlug = String(issue.status || "").toLowerCase().replace(/\s+/g, "-");
+
+        const card = document.createElement("div");
+        card.className = "bookfair-card " + priorityClass;
+
+        card.innerHTML = `
+            <div class="bookfair-card-top">
+                <h3>${escapeHtml(issue.summary)}</h3>
+                <span class="status-badge status-${statusSlug}">${escapeHtml(issue.status || "Unknown")}</span>
+            </div>
+            <div class="bookfair-card-meta">
+                <span>${escapeHtml(issue.key)}</span>
+                <span>${escapeHtml(issue.assignee || "Unassigned")}</span>
+                <span>${issue.priority ? escapeHtml(issue.priority) + " priority" : "No priority"}</span>
+                ${issue.dueDate ? `<span>Due ${escapeHtml(displayDate(issue.dueDate))}</span>` : ""}
+            </div>
+        `;
+
+        card.style.cursor = "pointer";
+        card.title = "Open " + issue.key + " in Jira";
+
+        card.addEventListener("click", function () {
+            window.open(issue.url, "_blank", "noopener");
+        });
+
+        return card;
+
     });
 
 }
