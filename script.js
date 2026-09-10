@@ -937,7 +937,7 @@ function renderRegularTasks() {
                 <div class="regular-task-list">
         `;
 
-        const orderedGroup = sortMineFirst(group, function(task) { return task.assignedTo; });
+        const orderedGroup = orderByRelevance(group, { dateField: "expectedDate" });
 
         orderedGroup.forEach(function(task) {
             html += createRegularTaskCard(task);
@@ -2256,69 +2256,84 @@ function sortMineFirst(list, getAssignee) {
    Used to sort every group/section of tasks. Tasks with a due
    date come before tasks without one; within the same due date,
    High priority comes before Medium, then Low.
+   `dateField` lets this drive Regular Tasks too, which use
+   "expectedDate" instead of "dueDate".
 ========================================================= */
 
 const PRIORITY_SORT_ORDER = { high: 0, medium: 1, low: 2 };
 
-function compareTasksByDueDateThenPriority(a, b) {
+function makeDateThenPriorityComparator(dateField) {
 
-    const dateA = parseDate(a.dueDate);
-    const dateB = parseDate(b.dueDate);
+    return function(a, b) {
 
-    if (dateA && dateB) {
-        const diff = dateA.getTime() - dateB.getTime();
-        if (diff !== 0) return diff;
-    } else if (dateA && !dateB) {
-        return -1;
-    } else if (!dateA && dateB) {
-        return 1;
-    }
+        const dateA = parseDate(a[dateField]);
+        const dateB = parseDate(b[dateField]);
 
-    const priorityA = PRIORITY_SORT_ORDER[String(a.priority || "").toLowerCase()] ?? 99;
-    const priorityB = PRIORITY_SORT_ORDER[String(b.priority || "").toLowerCase()] ?? 99;
+        if (dateA && dateB) {
+            const diff = dateA.getTime() - dateB.getTime();
+            if (diff !== 0) return diff;
+        } else if (dateA && !dateB) {
+            return -1;
+        } else if (!dateA && dateB) {
+            return 1;
+        }
 
-    return priorityA - priorityB;
+        const priorityA = PRIORITY_SORT_ORDER[String(a.priority || "").toLowerCase()] ?? 99;
+        const priorityB = PRIORITY_SORT_ORDER[String(b.priority || "").toLowerCase()] ?? 99;
+
+        return priorityA - priorityB;
+
+    };
 
 }
 
+const compareTasksByDueDateThenPriority = makeDateThenPriorityComparator("dueDate");
+const compareTasksByExpectedDateThenPriority = makeDateThenPriorityComparator("expectedDate");
+
 /* =========================================================
-   TASK SECTIONS FOR THE ALL TASKS PAGE
-   Groups the current user's visible tasks into: My Tasks, their
-   primary department's tasks, then every other department they
-   have access to — each internally sorted by due date + priority.
+   RELEVANCE SECTIONS: MY TASKS → PRIMARY DEPARTMENT → OTHERS
+   Groups any list of task-like items (Master Tasks, Book Fair
+   tasks, or Regular Tasks) into: assigned to the logged-in user,
+   their primary department's items, then every other department
+   they have access to — each internally sorted by due/expected
+   date + priority. Used by the All Tasks page, Book Fair, and
+   Regular Tasks so the ordering behaves identically everywhere.
    `tasks` is already scoped to what this user is allowed to see
    (see filterTasksForCurrentUser), so "other" here naturally means
    "other departments they have coordination access to".
 ========================================================= */
 
-function buildTaskSections(sourceTasks) {
+function buildRelevanceSections(sourceItems, options) {
+
+    const dateField = (options && options.dateField) || "dueDate";
+    const comparator = makeDateThenPriorityComparator(dateField);
 
     const primaryDepartment = String(currentUser?.primaryDepartment || "").trim();
     const hasPrimaryDepartment = primaryDepartment && primaryDepartment.toLowerCase() !== "all";
 
     const mine = [];
-    const primaryDeptTasks = [];
-    const otherTasks = [];
+    const primaryDeptItems = [];
+    const otherItems = [];
 
-    sourceTasks.forEach(function(task) {
+    sourceItems.forEach(function(item) {
 
-        if (currentUserMatches(task.assignedTo)) {
-            mine.push(task);
+        if (currentUserMatches(item.assignedTo)) {
+            mine.push(item);
             return;
         }
 
-        if (hasPrimaryDepartment && task.department === primaryDepartment) {
-            primaryDeptTasks.push(task);
+        if (hasPrimaryDepartment && item.department === primaryDepartment) {
+            primaryDeptItems.push(item);
             return;
         }
 
-        otherTasks.push(task);
+        otherItems.push(item);
 
     });
 
-    mine.sort(compareTasksByDueDateThenPriority);
-    primaryDeptTasks.sort(compareTasksByDueDateThenPriority);
-    otherTasks.sort(compareTasksByDueDateThenPriority);
+    mine.sort(comparator);
+    primaryDeptItems.sort(comparator);
+    otherItems.sort(comparator);
 
     const sections = [];
 
@@ -2326,21 +2341,40 @@ function buildTaskSections(sourceTasks) {
         sections.push({ title: "My Tasks", tasks: mine });
     }
 
-    if (hasPrimaryDepartment && primaryDeptTasks.length) {
-        sections.push({ title: primaryDepartment + " Tasks", tasks: primaryDeptTasks });
+    if (hasPrimaryDepartment && primaryDeptItems.length) {
+        sections.push({ title: primaryDepartment + " Tasks", tasks: primaryDeptItems });
     }
 
-    if (otherTasks.length) {
+    if (otherItems.length) {
         sections.push({
             title: (hasPrimaryDepartment || mine.length)
                 ? "Other Departments You Have Access To"
                 : "All Tasks",
-            tasks: otherTasks
+            tasks: otherItems
         });
     }
 
     return sections;
 
+}
+
+/* Flat version of the same grouping — mine, then primary department,
+   then other departments, each internally sorted — but returned as a
+   single ordered array instead of titled sections. Used inside
+   Regular Tasks, which already has its own frequency group headers
+   (Daily/Weekly/...), so a second layer of section headers there
+   would be one too many. */
+function orderByRelevance(sourceItems, options) {
+
+    return buildRelevanceSections(sourceItems, options)
+        .reduce(function(all, section) { return all.concat(section.tasks); }, []);
+
+}
+
+/* Back-compat alias: the All Tasks page originally called this
+   directly with Master Task objects (dueDate). */
+function buildTaskSections(sourceTasks) {
+    return buildRelevanceSections(sourceTasks, { dateField: "dueDate" });
 }
 
 /* ---------------------------------------------------------------------
@@ -3104,25 +3138,19 @@ function renderBookFair() {
     if (!grid) return;
 
     const bookFairTasks = tasks.filter(function(task) { return task.department === "Book Fair - Events"; });
-    const ordered = sortMineFirst(bookFairTasks, function(task) { return task.assignedTo; })
-        .slice()
-        .sort(function(a, b) {
 
-            const rankA = PRIORITY_RANK[a.priority] ?? 3;
-            const rankB = PRIORITY_RANK[b.priority] ?? 3;
-
-            if (rankA !== rankB) return rankA - rankB;
-
-            return String(a.dueDate).localeCompare(String(b.dueDate));
-
-        });
-
-    if (!ordered.length) {
+    if (!bookFairTasks.length) {
         grid.innerHTML = `<div class="empty-state">No Book Fair tasks yet. Add one to get started.</div>`;
         return;
     }
 
-    grid.innerHTML = ordered.map(function(task) {
+    // Same My Tasks → primary department → other departments grouping
+    // as the All Tasks page, each sorted by due date then priority.
+    const sections = buildRelevanceSections(bookFairTasks, { dateField: "dueDate" });
+
+    const ordered = sections.reduce(function(all, section) { return all.concat(section.tasks); }, []);
+
+    function buildCardHtml(task) {
 
         const priorityClass = "priority-border-" + String(task.priority || "").toLowerCase();
 
@@ -3150,6 +3178,15 @@ function renderBookFair() {
                 </div>
             </div>
         `;
+
+    }
+
+    grid.innerHTML = sections.map(function(section) {
+
+        const header = `<div class="grid-section-header">${escapeHtml(section.title)}<span class="table-section-count">${section.tasks.length}</span></div>`;
+        const cards = section.tasks.map(buildCardHtml).join("");
+
+        return header + cards;
 
     }).join("");
 
