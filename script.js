@@ -3230,6 +3230,7 @@ function renderBookFair() {
 function initializeJira() {
 
     const refreshButton = document.getElementById("jiraRefreshButton");
+    const projectFilter = document.getElementById("jiraProjectFilter");
     const statusFilter = document.getElementById("jiraStatusFilter");
     const search = document.getElementById("jiraSearch");
 
@@ -3237,6 +3238,10 @@ function initializeJira() {
         refreshButton.addEventListener("click", function () {
             renderJira(true);
         });
+    }
+
+    if (projectFilter) {
+        projectFilter.addEventListener("change", drawJiraGrid);
     }
 
     if (statusFilter) {
@@ -3277,6 +3282,27 @@ async function loadJiraIssues() {
 
 }
 
+function populateJiraProjectFilter() {
+
+    const select = document.getElementById("jiraProjectFilter");
+    if (!select) return;
+
+    const current = select.value;
+
+    const projects = Array.from(new Set(jiraIssues.map(function (issue) { return issue.project; }).filter(Boolean))).sort();
+
+    select.innerHTML =
+        '<option value="">All Projects</option>' +
+        projects.map(function (project) {
+            return `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`;
+        }).join("");
+
+    if (projects.includes(current)) {
+        select.value = current;
+    }
+
+}
+
 function populateJiraStatusFilter() {
 
     const select = document.getElementById("jiraStatusFilter");
@@ -3306,6 +3332,7 @@ async function renderJira(forceReload) {
     if (forceReload || !jiraIssues.length) {
         grid.innerHTML = '<div class="empty-state">Loading Jira issues...</div>';
         await loadJiraIssues();
+        populateJiraProjectFilter();
         populateJiraStatusFilter();
     }
 
@@ -3318,11 +3345,13 @@ function drawJiraGrid() {
     const grid = document.getElementById("jiraGrid");
     if (!grid) return;
 
+    const projectFilter = (document.getElementById("jiraProjectFilter") || {}).value || "";
     const statusFilter = (document.getElementById("jiraStatusFilter") || {}).value || "";
     const searchTerm = ((document.getElementById("jiraSearch") || {}).value || "").trim().toLowerCase();
 
     const filtered = jiraIssues.filter(function (issue) {
 
+        if (projectFilter && issue.project !== projectFilter) return false;
         if (statusFilter && issue.status !== statusFilter) return false;
 
         if (searchTerm) {
@@ -3356,6 +3385,7 @@ function drawJiraGrid() {
             </div>
             <div class="bookfair-card-meta">
                 <span>${escapeHtml(issue.key)}</span>
+                ${issue.project ? `<span>${escapeHtml(issue.project)}</span>` : ""}
                 <span>${escapeHtml(issue.assignee || "Unassigned")}</span>
                 <span>${issue.priority ? escapeHtml(issue.priority) + " priority" : "No priority"}</span>
                 ${issue.dueDate ? `<span>Due ${escapeHtml(displayDate(issue.dueDate))}</span>` : ""}
