@@ -419,6 +419,21 @@ function initializeDepartments() {
 
     }
 
+    const backlogFilter = document.getElementById("backlogDepartmentFilter");
+
+    if (backlogFilter) {
+
+        backlogFilter.innerHTML = '<option value="">All Departments</option>';
+
+        DEPARTMENTS.forEach(function (department) {
+            const option = document.createElement("option");
+            option.value = department;
+            option.textContent = department;
+            backlogFilter.appendChild(option);
+        });
+
+    }
+
     renderDepartmentCards();
 
 }
@@ -1240,6 +1255,33 @@ function renderRecentTasks() {
    ALL TASKS
 ========================================================= */
 
+/* ---------------------------------------------------------------------
+   Builds one <tr> for the All Tasks table. Extracted so both the flat
+   (filtered/searched) view and the grouped-sections view render rows
+   identically.
+--------------------------------------------------------------------- */
+function buildAllTasksRow(task) {
+
+    const row = document.createElement("tr");
+    row.className = "row-clickable";
+    row.dataset.id = task.taskId;
+
+    row.innerHTML = `
+        <td>${escapeHTML(task.taskId)}</td>
+        <td><strong>${escapeHTML(task.task)}</strong></td>
+        <td>${escapeHTML(task.department)}</td>
+        <td>${escapeHTML(task.assignedTo)}</td>
+        <td>${priorityBadge(task.priority)}</td>
+        <td>${statusBadge(task.status, task)}</td>
+        <td>${displayDate(task.dueDate)}</td>
+        <td class="checklist-cell">${checklistStatusDot("task:" + task.taskId)}</td>
+        <td>${isPrivilegedUser() ? `<button class="table-action edit-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
+    `;
+
+    return row;
+
+}
+
 function renderTasksTable() {
 
     const tbody = document.getElementById("allTasksTable");
@@ -1249,6 +1291,8 @@ function renderTasksTable() {
     const department = document.getElementById("departmentFilter")?.value || "";
     const priority = document.getElementById("priorityFilter")?.value || "";
     const status = document.getElementById("statusFilter")?.value || "";
+
+    const noActiveFilters = !search && !department && !priority && !status;
 
     const filtered = tasks.filter(function(task) {
 
@@ -1265,36 +1309,47 @@ function renderTasksTable() {
 
     });
 
-    const ordered = sortMineFirst(filtered, function(task) { return task.assignedTo; });
-
     tbody.innerHTML = "";
 
-    if (!ordered.length) {
+    if (!filtered.length) {
         tbody.innerHTML = `<tr><td colspan="9" class="empty-table">No matching tasks available.</td></tr>`;
         return;
     }
 
-    batchRows(tbody, ordered, function(task) {
+    /* With no search/filter active, group into My Tasks → primary
+       department → other accessible departments (each sorted by due
+       date then priority) so the most relevant work surfaces first.
+       As soon as the person searches or filters, show a single flat
+       list — still sorted by due date + priority — since they're
+       looking for something specific rather than browsing by section. */
+    if (noActiveFilters && currentUser) {
 
-        const row = document.createElement("tr");
-        row.className = "row-clickable";
-        row.dataset.id = task.taskId;
+        const sections = buildTaskSections(filtered);
 
-        row.innerHTML = `
-            <td>${escapeHTML(task.taskId)}</td>
-            <td><strong>${escapeHTML(task.task)}</strong></td>
-            <td>${escapeHTML(task.department)}</td>
-            <td>${escapeHTML(task.assignedTo)}</td>
-            <td>${priorityBadge(task.priority)}</td>
-            <td>${statusBadge(task.status, task)}</td>
-            <td>${displayDate(task.dueDate)}</td>
-            <td class="checklist-cell">${checklistStatusDot("task:" + task.taskId)}</td>
-            <td>${isPrivilegedUser() ? `<button class="table-action edit-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
-        `;
+        const fragment = document.createDocumentFragment();
 
-        return row;
+        sections.forEach(function(section) {
 
-    });
+            const headerRow = document.createElement("tr");
+            headerRow.className = "table-section-row";
+            headerRow.innerHTML = `<td colspan="9"><div class="table-section-header">${escapeHTML(section.title)}<span class="table-section-count">${section.tasks.length}</span></div></td>`;
+            fragment.appendChild(headerRow);
+
+            section.tasks.forEach(function(task) {
+                fragment.appendChild(buildAllTasksRow(task));
+            });
+
+        });
+
+        tbody.appendChild(fragment);
+
+    } else {
+
+        const ordered = filtered.slice().sort(compareTasksByDueDateThenPriority);
+
+        batchRows(tbody, ordered, buildAllTasksRow);
+
+    }
 
     // Single delegated listener set up once (see initializeAllTasksTableDelegation)
     // handles clicks for every row, so re-rendering the table on every keystroke
@@ -2196,6 +2251,98 @@ function sortMineFirst(list, getAssignee) {
 
 }
 
+/* =========================================================
+   TASK ORDERING: DUE DATE, THEN PRIORITY
+   Used to sort every group/section of tasks. Tasks with a due
+   date come before tasks without one; within the same due date,
+   High priority comes before Medium, then Low.
+========================================================= */
+
+const PRIORITY_SORT_ORDER = { high: 0, medium: 1, low: 2 };
+
+function compareTasksByDueDateThenPriority(a, b) {
+
+    const dateA = parseDate(a.dueDate);
+    const dateB = parseDate(b.dueDate);
+
+    if (dateA && dateB) {
+        const diff = dateA.getTime() - dateB.getTime();
+        if (diff !== 0) return diff;
+    } else if (dateA && !dateB) {
+        return -1;
+    } else if (!dateA && dateB) {
+        return 1;
+    }
+
+    const priorityA = PRIORITY_SORT_ORDER[String(a.priority || "").toLowerCase()] ?? 99;
+    const priorityB = PRIORITY_SORT_ORDER[String(b.priority || "").toLowerCase()] ?? 99;
+
+    return priorityA - priorityB;
+
+}
+
+/* =========================================================
+   TASK SECTIONS FOR THE ALL TASKS PAGE
+   Groups the current user's visible tasks into: My Tasks, their
+   primary department's tasks, then every other department they
+   have access to — each internally sorted by due date + priority.
+   `tasks` is already scoped to what this user is allowed to see
+   (see filterTasksForCurrentUser), so "other" here naturally means
+   "other departments they have coordination access to".
+========================================================= */
+
+function buildTaskSections(sourceTasks) {
+
+    const primaryDepartment = String(currentUser?.primaryDepartment || "").trim();
+    const hasPrimaryDepartment = primaryDepartment && primaryDepartment.toLowerCase() !== "all";
+
+    const mine = [];
+    const primaryDeptTasks = [];
+    const otherTasks = [];
+
+    sourceTasks.forEach(function(task) {
+
+        if (currentUserMatches(task.assignedTo)) {
+            mine.push(task);
+            return;
+        }
+
+        if (hasPrimaryDepartment && task.department === primaryDepartment) {
+            primaryDeptTasks.push(task);
+            return;
+        }
+
+        otherTasks.push(task);
+
+    });
+
+    mine.sort(compareTasksByDueDateThenPriority);
+    primaryDeptTasks.sort(compareTasksByDueDateThenPriority);
+    otherTasks.sort(compareTasksByDueDateThenPriority);
+
+    const sections = [];
+
+    if (mine.length) {
+        sections.push({ title: "My Tasks", tasks: mine });
+    }
+
+    if (hasPrimaryDepartment && primaryDeptTasks.length) {
+        sections.push({ title: primaryDepartment + " Tasks", tasks: primaryDeptTasks });
+    }
+
+    if (otherTasks.length) {
+        sections.push({
+            title: (hasPrimaryDepartment || mine.length)
+                ? "Other Departments You Have Access To"
+                : "All Tasks",
+            tasks: otherTasks
+        });
+    }
+
+    return sections;
+
+}
+
 /* ---------------------------------------------------------------------
    CHECKLISTS  (entityKey e.g. "task:T004", "bookfair:T011")
 --------------------------------------------------------------------- */
@@ -2702,6 +2849,11 @@ function initializeBacklog() {
         addButton.addEventListener("click", function() { openBacklogItemModal(); });
     }
 
+    const departmentFilter = document.getElementById("backlogDepartmentFilter");
+    if (departmentFilter) {
+        departmentFilter.addEventListener("change", renderBacklog);
+    }
+
     if (closeButton) closeButton.addEventListener("click", closeBacklogItemModal);
     if (cancelButton) cancelButton.addEventListener("click", closeBacklogItemModal);
 
@@ -2842,10 +2994,18 @@ function renderBacklog() {
     const grid = document.getElementById("backlogGrid");
     if (!grid) return;
 
-    const ordered = sortMineFirst(backlogTasks, function(item) { return item.createdBy; });
+    const departmentFilterValue = document.getElementById("backlogDepartmentFilter")?.value || "";
+
+    const scoped = departmentFilterValue
+        ? backlogTasks.filter(function(item) { return item.department === departmentFilterValue; })
+        : backlogTasks;
+
+    const ordered = sortMineFirst(scoped, function(item) { return item.createdBy; });
 
     if (!ordered.length) {
-        grid.innerHTML = `<div class="empty-state">No backlog items yet. Add future or paused work to keep track of it here.</div>`;
+        grid.innerHTML = departmentFilterValue
+            ? `<div class="empty-state">No backlog items for ${escapeHtml(departmentFilterValue)} yet.</div>`
+            : `<div class="empty-state">No backlog items yet. Add future or paused work to keep track of it here.</div>`;
         return;
     }
 
