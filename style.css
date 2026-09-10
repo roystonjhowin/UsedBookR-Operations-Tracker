@@ -825,7 +825,7 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 
 .table-action {
     border: 1px solid var(--border); background: var(--surface); color: var(--forest); font-size: 11.5px; font-weight: 700;
-    padding: 6px 12px; border-radius: 7px; cursor: pointer; transition: all 0.15s var(--ease-soft);
+    padding: 6px 12px; border-radius: 7px; cursor: pointer; transition: background-color 0.15s var(--ease-soft), color 0.15s var(--ease-soft), border-color 0.15s var(--ease-soft), transform 0.15s var(--ease-soft), opacity 0.15s var(--ease-soft);
 }
 
 .table-action:hover { background: var(--forest); color: white; border-color: var(--forest); transform: translateY(-1px); }
@@ -943,7 +943,7 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 
 .modal-close {
     width: 34px; height: 34px; border: none; border-radius: 8px; background: var(--surface-alt);
-    font-size: 20px; color: var(--muted); cursor: pointer; transition: all 0.15s var(--ease-soft);
+    font-size: 20px; color: var(--muted); cursor: pointer; transition: background-color 0.15s var(--ease-soft), color 0.15s var(--ease-soft), border-color 0.15s var(--ease-soft), transform 0.15s var(--ease-soft), opacity 0.15s var(--ease-soft);
 }
 
 .modal-close:hover { background: #fbe4e2; color: var(--danger); transform: rotate(90deg); }
@@ -991,7 +991,7 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 
 .regular-task-update-button {
     align-self: flex-start; border: 1px solid var(--forest); background: var(--surface); color: var(--forest);
-    font-size: 11.5px; font-weight: 700; padding: 7px 14px; border-radius: 7px; cursor: pointer; transition: all 0.15s var(--ease-soft);
+    font-size: 11.5px; font-weight: 700; padding: 7px 14px; border-radius: 7px; cursor: pointer; transition: background-color 0.15s var(--ease-soft), color 0.15s var(--ease-soft), border-color 0.15s var(--ease-soft), transform 0.15s var(--ease-soft), opacity 0.15s var(--ease-soft);
 }
 
 .regular-task-update-button:hover { background: var(--forest); color: white; transform: translateY(-1px); }
@@ -1011,7 +1011,7 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 
 .regular-task-update-close {
     width: 32px; height: 32px; border: none; border-radius: 8px; background: var(--surface-alt); font-size: 18px;
-    color: var(--muted); cursor: pointer; transition: all 0.15s var(--ease-soft);
+    color: var(--muted); cursor: pointer; transition: background-color 0.15s var(--ease-soft), color 0.15s var(--ease-soft), border-color 0.15s var(--ease-soft), transform 0.15s var(--ease-soft), opacity 0.15s var(--ease-soft);
 }
 
 .regular-task-update-close:hover { background: #fbe4e2; color: var(--danger); transform: rotate(90deg); }
