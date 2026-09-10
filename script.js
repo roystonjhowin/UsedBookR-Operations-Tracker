@@ -3370,7 +3370,25 @@ function drawJiraGrid() {
         return;
     }
 
-    batchRows(grid, filtered, function (issue) {
+    // Group into one section per Jira project ("space"), so each
+    // project's tasks sit together under its own header — new
+    // projects/spaces just appear automatically as new sections,
+    // no code changes needed when Jira gains a project.
+    const groups = {};
+    const order = [];
+
+    filtered.forEach(function (issue) {
+        const key = issue.project || "Unassigned";
+        if (!groups[key]) {
+            groups[key] = [];
+            order.push(key);
+        }
+        groups[key].push(issue);
+    });
+
+    order.sort();
+
+    function buildCard(issue) {
 
         const priorityClass = "priority-border-" + String(issue.priority || "").toLowerCase();
         const statusSlug = String(issue.status || "").toLowerCase().replace(/\s+/g, "-");
@@ -3385,7 +3403,6 @@ function drawJiraGrid() {
             </div>
             <div class="bookfair-card-meta">
                 <span>${escapeHtml(issue.key)}</span>
-                ${issue.project ? `<span>${escapeHtml(issue.project)}</span>` : ""}
                 <span>${escapeHtml(issue.assignee || "Unassigned")}</span>
                 <span>${issue.priority ? escapeHtml(issue.priority) + " priority" : "No priority"}</span>
                 ${issue.dueDate ? `<span>Due ${escapeHtml(displayDate(issue.dueDate))}</span>` : ""}
@@ -3400,6 +3417,17 @@ function drawJiraGrid() {
         });
 
         return card;
+
+    }
+
+    order.forEach(function (projectName) {
+
+        const header = document.createElement("div");
+        header.className = "grid-section-header";
+        header.innerHTML = `${escapeHtml(projectName)}<span class="table-section-count">${groups[projectName].length}</span>`;
+        grid.appendChild(header);
+
+        batchRows(grid, groups[projectName], buildCard);
 
     });
 
