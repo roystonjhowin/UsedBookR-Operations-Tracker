@@ -10,6 +10,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="style.css">
+    <!-- Logo is needed immediately on both the login screen and sidebar,
+         so preload it instead of letting the browser discover it late
+         from inside the CSS/HTML parse. -->
+    <link rel="preload" as="image" href="assets/logo-usedbookr.png">
 </head>
 <body>
 
@@ -37,7 +41,7 @@
 
         <div class="login-card">
             <div class="login-brand">
-                <div class="logo-mark"><img src="assets/logo-usedbookr.png" alt="UsedBookR"></div>
+                <div class="logo-mark"><img src="assets/logo-usedbookr.png" alt="UsedBookR" decoding="async" fetchpriority="high"></div>
                 <h1>Excelso</h1>
                 <p>UsedBookR/Simply Sell Books Operations Tracker</p>
             </div>
@@ -83,7 +87,7 @@
     <!-- SIDEBAR -->
     <aside class="sidebar">
         <div class="sidebar-header">
-            <div class="sidebar-logo"><img src="assets/logo-usedbookr.png" alt="UsedBookR"></div>
+            <div class="sidebar-logo"><img src="assets/logo-usedbookr.png" alt="UsedBookR" decoding="async" fetchpriority="high"></div>
             <div class="sidebar-brand">
                 <strong>Excelso</strong>
                 <span>UsedBookR/Simply Sell Books Operations Tracker</span>
