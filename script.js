@@ -32,6 +32,31 @@ let isSavingTask = false;
 let currentUser = null;
 
 /* =========================================================
+   PERFORMANCE HELPERS
+   debounce(): stops fast-typing (search boxes) from triggering a
+   full re-render on every keystroke — we wait for a short pause
+   instead. batchRows(): appends many <tr>/<div> nodes to the DOM
+   in a single reflow via a DocumentFragment instead of one reflow
+   per row, which is what made large tables/lists feel choppy.
+========================================================= */
+
+function debounce(fn, wait = 150) {
+    let timer = null;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), wait);
+    };
+}
+
+function batchRows(container, items, buildNode) {
+    const fragment = document.createDocumentFragment();
+    items.forEach(function (item) {
+        fragment.appendChild(buildNode(item));
+    });
+    container.appendChild(fragment);
+}
+
+/* =========================================================
    INITIALIZATION
 ========================================================= */
 
@@ -54,6 +79,7 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeBacklog();
     initializeBookFair();
     initializeTaskDetailDrawer();
+    initializeAllTasksTableDelegation();
 
 });
 
@@ -137,7 +163,6 @@ function initializeLogin() {
 
             const result = await apiRequest("login", { username: username, password: password });
 
-            console.log("LOGIN RESPONSE:", result);
 
             if (!result || !result.success || !result.user) {
 
@@ -342,7 +367,6 @@ function logoutUser() {
 
 function applyUserAccess() {
     if (!currentUser) return;
-    console.log("AUTHENTICATED USER:", currentUser);
 }
 
 /* =========================================================
@@ -804,7 +828,6 @@ async function loadRegularTasks() {
         const response = await fetch(API_URL + "?action=getRegularTasks");
         const result = await response.json();
 
-        console.log("REGULAR TASKS API RESPONSE:", result);
 
         if (!result || !result.success) {
 
@@ -825,7 +848,6 @@ async function loadRegularTasks() {
 
         regularTasks = Array.isArray(result.regularTasks) ? result.regularTasks : [];
 
-        console.log("REGULAR TASKS LOADED:", regularTasks.length, regularTasks);
 
         renderRegularTasks();
 
@@ -1194,7 +1216,7 @@ function renderRecentTasks() {
         return;
     }
 
-    recent.forEach(function(task) {
+    batchRows(tbody, recent, function(task) {
 
         const row = document.createElement("tr");
 
@@ -1208,7 +1230,7 @@ function renderRecentTasks() {
             <td>${displayDate(task.dueDate)}</td>
         `;
 
-        tbody.appendChild(row);
+        return row;
 
     });
 
@@ -1252,7 +1274,7 @@ function renderTasksTable() {
         return;
     }
 
-    ordered.forEach(function(task) {
+    batchRows(tbody, ordered, function(task) {
 
         const row = document.createElement("tr");
         row.className = "row-clickable";
@@ -1270,21 +1292,43 @@ function renderTasksTable() {
             <td>${isPrivilegedUser() ? `<button class="table-action edit-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
         `;
 
-        row.addEventListener("click", function(event) {
-            if (event.target.closest(".edit-task")) return;
-            openTaskDetailDrawer(task.taskId);
-        });
-
-        tbody.appendChild(row);
+        return row;
 
     });
 
-    tbody.querySelectorAll(".edit-task").forEach(function(button) {
-        button.addEventListener("click", function(event) {
+    // Single delegated listener set up once (see initializeAllTasksTableDelegation)
+    // handles clicks for every row, so re-rendering the table on every keystroke
+    // no longer means re-attaching hundreds of listeners.
+
+}
+
+let allTasksTableDelegationReady = false;
+
+function initializeAllTasksTableDelegation() {
+
+    if (allTasksTableDelegationReady) return;
+
+    const tbody = document.getElementById("allTasksTable");
+    if (!tbody) return;
+
+    tbody.addEventListener("click", function(event) {
+
+        const editButton = event.target.closest(".edit-task");
+
+        if (editButton) {
             event.stopPropagation();
-            editTask(button.dataset.id);
-        });
+            editTask(editButton.dataset.id);
+            return;
+        }
+
+        const row = event.target.closest(".row-clickable");
+        if (row && row.dataset.id) {
+            openTaskDetailDrawer(row.dataset.id);
+        }
+
     });
+
+    allTasksTableDelegationReady = true;
 
 }
 
@@ -1337,7 +1381,7 @@ function renderFollowups() {
         return;
     }
 
-    followups.forEach(function(task) {
+    batchRows(tbody, followups, function(task) {
 
         const row = document.createElement("tr");
 
@@ -1351,7 +1395,7 @@ function renderFollowups() {
             <td>${statusBadge(task.status, task)}</td>
         `;
 
-        tbody.appendChild(row);
+        return row;
 
     });
 
@@ -1408,10 +1452,11 @@ function renderDepartmentTasks(departmentTasks) {
         return;
     }
 
-    ordered.forEach(function(task) {
+    batchRows(tbody, ordered, function(task) {
 
         const row = document.createElement("tr");
         row.className = "row-clickable";
+        row.dataset.id = task.taskId;
 
         row.innerHTML = `
             <td>${escapeHTML(task.taskId)}</td>
@@ -1425,21 +1470,41 @@ function renderDepartmentTasks(departmentTasks) {
             <td>${isPrivilegedUser() ? `<button class="table-action edit-department-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
         `;
 
-        row.addEventListener("click", function(event) {
-            if (event.target.closest(".edit-department-task")) return;
-            openTaskDetailDrawer(task.taskId);
-        });
-
-        tbody.appendChild(row);
+        return row;
 
     });
 
-    tbody.querySelectorAll(".edit-department-task").forEach(function(button) {
-        button.addEventListener("click", function(event) {
+    initializeDepartmentTasksTableDelegation();
+
+}
+
+let departmentTasksTableDelegationReady = false;
+
+function initializeDepartmentTasksTableDelegation() {
+
+    if (departmentTasksTableDelegationReady) return;
+
+    const tbody = document.getElementById("departmentTasksTable");
+    if (!tbody) return;
+
+    tbody.addEventListener("click", function(event) {
+
+        const editButton = event.target.closest(".edit-department-task");
+
+        if (editButton) {
             event.stopPropagation();
-            editTask(button.dataset.id);
-        });
+            editTask(editButton.dataset.id);
+            return;
+        }
+
+        const row = event.target.closest(".row-clickable");
+        if (row && row.dataset.id) {
+            openTaskDetailDrawer(row.dataset.id);
+        }
+
     });
+
+    departmentTasksTableDelegationReady = true;
 
 }
 
@@ -1507,7 +1572,7 @@ function renderActivity() {
 
     container.innerHTML = "";
 
-    activities.forEach(function(task) {
+    batchRows(container, activities, function(task) {
 
         const item = document.createElement("div");
         item.className = "activity-item";
@@ -1521,7 +1586,7 @@ function renderActivity() {
             </div>
         `;
 
-        container.appendChild(item);
+        return item;
 
     });
 
@@ -1730,12 +1795,22 @@ function editTask(taskId) {
 
 function initializeFilters() {
 
+    const debouncedRender = debounce(renderTasksTable, 180);
+
     ["taskSearch", "departmentFilter", "priorityFilter", "statusFilter"].forEach(function(id) {
 
         const element = document.getElementById(id);
         if (!element) return;
 
-        element.addEventListener("input", renderTasksTable);
+        // Free-text search is debounced so a fast typist doesn't
+        // trigger a full table rebuild on every single keystroke.
+        // Dropdown filters change rarely, so they still update instantly.
+        if (id === "taskSearch") {
+            element.addEventListener("input", debouncedRender);
+        } else {
+            element.addEventListener("input", renderTasksTable);
+        }
+
         element.addEventListener("change", renderTasksTable);
 
     });
