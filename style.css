@@ -842,6 +842,20 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
     background: var(--forest); color: #fff; font-size: 10px; font-weight: 700;
 }
 
+/* Same section grouping (My Tasks / primary department / other
+   departments) used inside CSS-grid card layouts like Book Fair.
+   grid-column spans the header across every column in the grid. */
+.grid-section-header {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--forest-dark);
+    background: var(--surface-alt); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 14px;
+    margin-top: 4px;
+}
+.grid-section-header:first-child { margin-top: 0; }
+
 .table-action {
     border: 1px solid var(--border); background: var(--surface); color: var(--forest); font-size: 11.5px; font-weight: 700;
     padding: 6px 12px; border-radius: 7px; cursor: pointer; transition: background-color 0.15s var(--ease-soft), color 0.15s var(--ease-soft), border-color 0.15s var(--ease-soft), transform 0.15s var(--ease-soft), opacity 0.15s var(--ease-soft);
