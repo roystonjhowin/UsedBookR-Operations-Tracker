@@ -57,6 +57,36 @@ function batchRows(container, items, buildNode) {
 }
 
 /* =========================================================
+   SKELETON LOADERS
+   Lightweight shimmer placeholders shown while a table/grid's
+   first batch of data is still loading, instead of a bare
+   "Loading..." text string — purely a perceived-speed /
+   smoothness improvement, no functional effect.
+========================================================= */
+
+function skeletonTableRows(colspan, count = 5) {
+    let html = "";
+    for (let i = 0; i < count; i++) {
+        html += `<tr class="skeleton-row"><td colspan="${colspan}"><div class="skeleton-bar" style="width:${85 - i * 6}%;"></div></td></tr>`;
+    }
+    return html;
+}
+
+function skeletonCards(count = 4) {
+    let html = "";
+    for (let i = 0; i < count; i++) {
+        html += `
+            <div class="skeleton-card">
+                <div class="skeleton-bar skeleton-bar-title"></div>
+                <div class="skeleton-bar" style="width:70%;"></div>
+                <div class="skeleton-bar" style="width:45%;"></div>
+            </div>
+        `;
+    }
+    return html;
+}
+
+/* =========================================================
    INITIALIZATION
 ========================================================= */
 
@@ -80,6 +110,10 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeBookFair();
     initializeTaskDetailDrawer();
     initializeAllTasksTableDelegation();
+
+    initializeRegularTasksFilter();
+    initializeRegularTasksDelegation();
+    initializeRegularTaskChecklistDrawer();
 
 });
 
@@ -347,6 +381,11 @@ function initializeLogout() {
 function logoutUser() {
 
     currentUser = null;
+
+    // so the Regular Tasks department filter re-defaults to the next
+    // logged-in user's own primary department instead of keeping
+    // whatever the previous session had selected.
+    regularTasksFilterDefaulted = false;
 
     sessionStorage.removeItem("usedbookrOperationsLogin");
     sessionStorage.removeItem("usedbookrCurrentUser");
@@ -837,7 +876,7 @@ async function loadRegularTasks() {
     try {
 
         if (container) {
-            container.innerHTML = `<div class="regular-tasks-loading">Loading regular tasks...</div>`;
+            container.innerHTML = `<div class="skeleton-card-grid">${skeletonCards(4)}</div>`;
         }
 
         const response = await fetch(API_URL + "?action=getRegularTasks");
@@ -864,6 +903,7 @@ async function loadRegularTasks() {
         regularTasks = Array.isArray(result.regularTasks) ? result.regularTasks : [];
 
 
+        populateRegularTasksDepartmentFilter();
         renderRegularTasks();
 
     }
@@ -877,6 +917,66 @@ async function loadRegularTasks() {
             container.innerHTML = `<div class="regular-tasks-empty">Unable to load regular tasks. Please try again.</div>`;
         }
 
+    }
+
+}
+
+/* =========================================================
+   REGULAR TASKS — DEPARTMENT SCOPE FILTER
+   Default view scopes Regular Tasks to the logged-in user's
+   primary department only ("My Department"), matching how All
+   Tasks / Book Fair keep a person's own area front and center.
+   Other departments are only shown once picked from the dropdown
+   (or "All Departments" is chosen). Within whatever scope is
+   selected, cards still order Mine → Primary Department → Others
+   (see orderByRelevance / buildRelevanceSections), exactly like
+   the All Tasks page — so a person's own assigned tasks always
+   surface first.
+========================================================= */
+
+let regularTasksFilterDefaulted = false;
+
+function populateRegularTasksDepartmentFilter() {
+
+    const select = document.getElementById("regularTasksDepartmentFilter");
+    if (!select) return;
+
+    const previousValue = select.value;
+
+    const departmentsInData = Array.from(
+        new Set(
+            regularTasks
+                .map(function(t) { return String(t.department || "").trim(); })
+                .filter(function(d) { return d !== ""; })
+        )
+    ).sort();
+
+    select.innerHTML =
+        `<option value="__mine__">My Department</option>` +
+        `<option value="">All Departments</option>` +
+        departmentsInData.map(function(department) {
+            return `<option value="${escapeHtml(department)}">${escapeHtml(department)}</option>`;
+        }).join("");
+
+    if (!regularTasksFilterDefaulted) {
+
+        const primaryDepartment = String(currentUser?.primaryDepartment || "").trim();
+        select.value = (primaryDepartment && primaryDepartment.toLowerCase() !== "all") ? "__mine__" : "";
+        regularTasksFilterDefaulted = true;
+
+    } else if (previousValue) {
+
+        select.value = previousValue;
+
+    }
+
+}
+
+function initializeRegularTasksFilter() {
+
+    const select = document.getElementById("regularTasksDepartmentFilter");
+    if (select) {
+        select.addEventListener("change", renderRegularTasks);
     }
 
 }
@@ -899,9 +999,34 @@ function renderRegularTasks() {
         return;
     }
 
+    /* Scope to the selected department before anything else. "__mine__"
+       (the default) scopes to the logged-in user's primary department;
+       "" shows every department; anything else is an explicit department
+       name picked from the dropdown. */
+    const filterValue = document.getElementById("regularTasksDepartmentFilter")?.value ?? "__mine__";
+    const primaryDepartment = String(currentUser?.primaryDepartment || "").trim();
+    const hasPrimaryDepartment = primaryDepartment && primaryDepartment.toLowerCase() !== "all";
+
+    let scoped = regularTasks;
+
+    if (filterValue === "__mine__") {
+        if (hasPrimaryDepartment) {
+            scoped = regularTasks.filter(function(t) { return String(t.department || "").trim() === primaryDepartment; });
+        }
+        // no primary department on file (e.g. Founder) — "My Department" has nothing to scope to, show everything
+    } else if (filterValue) {
+        scoped = regularTasks.filter(function(t) { return String(t.department || "").trim() === filterValue; });
+    }
+
+    if (!scoped.length) {
+        const scopeLabel = filterValue === "__mine__" ? "your department" : (filterValue ? escapeHtml(filterValue) : "");
+        container.innerHTML = `<div class="regular-tasks-empty">No regular tasks for ${scopeLabel || "this view"} yet.</div>`;
+        return;
+    }
+
     const groups = {};
 
-    regularTasks.forEach(function(task) {
+    scoped.forEach(function(task) {
 
         const frequency = String(task.expectedTime || "Other").trim().toLowerCase();
 
@@ -937,6 +1062,10 @@ function renderRegularTasks() {
                 <div class="regular-task-list">
         `;
 
+        /* Mine → Primary Department → Others, same as All Tasks / Book Fair
+           (see buildRelevanceSections). With the department scope already
+           narrowed above, this mainly surfaces the current user's own
+           assigned tasks first within that scope. */
         const orderedGroup = orderByRelevance(group, { dateField: "expectedDate" });
 
         orderedGroup.forEach(function(task) {
@@ -1111,9 +1240,10 @@ function createRegularTaskCard(task) {
     const priority = String(task.priority || "").trim();
     const expectedTime = String(task.expectedTime || "").trim();
     const expectedDate = String(task.expectedDate || "").trim();
+    const dueSoon = isDueSoon(task, "expectedDate");
 
     return `
-        <div class="regular-task-card" data-regular-task-id="${escapeHtml(id)}">
+        <div class="regular-task-card${dueSoon ? " card-due-soon" : ""}" data-regular-task-id="${escapeHtml(id)}">
             <div class="regular-task-card-main">
                 <div class="regular-task-id">${escapeHtml(id)}</div>
                 <h3>${escapeHtml(taskName)}</h3>
@@ -1122,12 +1252,116 @@ function createRegularTaskCard(task) {
                     ${assignedTo ? `<span>Assigned To: ${escapeHtml(assignedTo)}</span>` : ""}
                     ${priority ? `<span>Priority: ${escapeHtml(priority)}</span>` : ""}
                     ${expectedTime ? `<span>Expected: ${escapeHtml(expectedTime)}</span>` : ""}
-                    ${expectedDate ? `<span>Expected Date: ${escapeHtml(expectedDate)}</span>` : ""}
+                    ${expectedDate ? `<span>Expected Date: ${escapeHtml(displayDate(expectedDate))}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</span>` : ""}
                 </div>
             </div>
-            <button type="button" class="regular-task-update-button" onclick="openRegularTaskUpdate('${escapeHtml(id)}')">Update</button>
+            <div class="regular-task-card-actions">
+                <button type="button" class="regular-task-checklist-button" data-regular-task-id="${escapeHtml(id)}">
+                    ${checklistStatusDot("regular:" + id)} Checklist
+                </button>
+                <button type="button" class="regular-task-update-button" onclick="openRegularTaskUpdate('${escapeHtml(id)}')">Update</button>
+            </div>
         </div>
     `;
+
+}
+
+/* =========================================================
+   REGULAR TASK CHECKLIST DRAWER
+   Same generic checklist plumbing used by the Task Detail drawer
+   and Book Fair cards (renderChecklistInto / Task Checklists
+   sheet), keyed on "regular:<regularTaskId>" so every add/toggle
+   is written to the same spreadsheet-backed endpoint and persists
+   like any other checklist item.
+========================================================= */
+
+let regularTaskChecklistCurrentId = "";
+
+let regularTasksDelegationReady = false;
+
+function initializeRegularTasksDelegation() {
+
+    if (regularTasksDelegationReady) return;
+
+    const container = document.getElementById("regularTasksContainer");
+    if (!container) return;
+
+    container.addEventListener("click", function(event) {
+
+        const button = event.target.closest(".regular-task-checklist-button");
+        if (!button) return;
+
+        openRegularTaskChecklistDrawer(button.dataset.regularTaskId);
+
+    });
+
+    regularTasksDelegationReady = true;
+
+}
+
+function initializeRegularTaskChecklistDrawer() {
+
+    const form = document.getElementById("regularTaskChecklistForm");
+
+    // form itself is wired lazily by renderChecklistInto() the first time
+    // the drawer opens (it checks formElement.dataset.wired), so nothing
+    // else to set up here beyond making sure the element exists.
+    if (!form) {
+        console.warn("Regular Task Checklist form not found.");
+    }
+
+}
+
+function refreshRegularTaskChecklistDrawer() {
+
+    if (!regularTaskChecklistCurrentId) return;
+
+    const entityKey = "regular:" + regularTaskChecklistCurrentId;
+
+    const list = document.getElementById("regularTaskChecklistList");
+    const form = document.getElementById("regularTaskChecklistForm");
+    const input = document.getElementById("regularTaskChecklistInput");
+    const progress = document.getElementById("regularTaskChecklistProgress");
+
+    renderChecklistInto(entityKey, list, form, input, true, isPrivilegedUser(), refreshRegularTaskChecklistDrawer);
+    updateChecklistProgressLabel(entityKey, progress);
+
+    renderRegularTasks();
+
+}
+
+function openRegularTaskChecklistDrawer(regularTaskId) {
+
+    const task = regularTasks.find(function(item) {
+        return String(item.regularTaskId || "").trim() === String(regularTaskId || "").trim();
+    });
+
+    if (!task) {
+        showNotification("Error", "Regular task could not be found.");
+        return;
+    }
+
+    regularTaskChecklistCurrentId = task.regularTaskId;
+
+    setText("regularTaskChecklistTitle", task.task || "Regular Task");
+    setText("regularTaskChecklistDepartment", task.department || "-");
+    setText("regularTaskChecklistExpectedTime", task.expectedTime || "-");
+
+    refreshRegularTaskChecklistDrawer();
+
+    const drawer = document.getElementById("regularTaskChecklistDrawer");
+    if (drawer) drawer.style.display = "block";
+    document.body.classList.add("modal-open");
+
+}
+
+function closeRegularTaskChecklistDrawer() {
+
+    const drawer = document.getElementById("regularTaskChecklistDrawer");
+    if (drawer) drawer.style.display = "none";
+
+    document.body.classList.remove("modal-open");
+    regularTaskChecklistCurrentId = "";
 
 }
 
@@ -1234,6 +1468,7 @@ function renderRecentTasks() {
     batchRows(tbody, recent, function(task) {
 
         const row = document.createElement("tr");
+        if (isDueSoon(task)) row.className = "row-due-soon";
 
         row.innerHTML = `
             <td>${escapeHTML(task.taskId)}</td>
@@ -1242,7 +1477,7 @@ function renderRecentTasks() {
             <td>${escapeHTML(task.assignedTo)}</td>
             <td>${priorityBadge(task.priority)}</td>
             <td>${statusBadge(task.status, task)}</td>
-            <td>${displayDate(task.dueDate)}</td>
+            <td>${dueDateWithChip(task)}</td>
         `;
 
         return row;
@@ -1263,7 +1498,7 @@ function renderRecentTasks() {
 function buildAllTasksRow(task) {
 
     const row = document.createElement("tr");
-    row.className = "row-clickable";
+    row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "");
     row.dataset.id = task.taskId;
 
     row.innerHTML = `
@@ -1273,7 +1508,7 @@ function buildAllTasksRow(task) {
         <td>${escapeHTML(task.assignedTo)}</td>
         <td>${priorityBadge(task.priority)}</td>
         <td>${statusBadge(task.status, task)}</td>
-        <td>${displayDate(task.dueDate)}</td>
+        <td>${dueDateWithChip(task)}</td>
         <td class="checklist-cell">${checklistStatusDot("task:" + task.taskId)}</td>
         <td>${isPrivilegedUser() ? `<button class="table-action edit-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
     `;
@@ -1510,7 +1745,7 @@ function renderDepartmentTasks(departmentTasks) {
     batchRows(tbody, ordered, function(task) {
 
         const row = document.createElement("tr");
-        row.className = "row-clickable";
+        row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "");
         row.dataset.id = task.taskId;
 
         row.innerHTML = `
@@ -1519,7 +1754,7 @@ function renderDepartmentTasks(departmentTasks) {
             <td>${escapeHTML(task.assignedTo)}</td>
             <td>${priorityBadge(task.priority)}</td>
             <td>${statusBadge(task.status, task)}</td>
-            <td>${displayDate(task.dueDate)}</td>
+            <td>${dueDateWithChip(task)}</td>
             <td>${displayDate(task.followupDate)}</td>
             <td class="checklist-cell">${checklistStatusDot("task:" + task.taskId)}</td>
             <td>${isPrivilegedUser() ? `<button class="table-action edit-department-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
@@ -2000,6 +2235,53 @@ function isOverdue(task) {
     if (!task.dueDate || task.status === "Completed") return false;
 
     return dateBeforeToday(task.dueDate);
+
+}
+
+/* =========================================================
+   DUE-SOON HIGHLIGHTING
+   Anything due within the next 3 days (today, tomorrow, or the
+   day after — but not already overdue, and not Completed) gets
+   flagged so it can be visually highlighted in red across every
+   task list: All Tasks, Recent Tasks, Department Tasks, Book Fair,
+   Regular Tasks (against expectedDate) and Backlog (when its
+   optional Expected Date / Period happens to parse as a real date).
+   `dateField` defaults to "dueDate" but Regular Tasks passes
+   "expectedDate" instead.
+========================================================= */
+
+function isDueSoon(task, dateField = "dueDate") {
+
+    if (!task || task.status === "Completed") return false;
+
+    const value = task[dateField];
+    if (!value) return false;
+
+    const date = parseDate(value);
+    if (!date) return false;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    date.setHours(0, 0, 0, 0);
+
+    const diffDays = Math.round((date.getTime() - today.getTime()) / 86400000);
+
+    // diffDays < 0 is already overdue (handled separately by isOverdue's
+    // own styling), so due-soon only covers "not yet due, but within 3 days".
+    return diffDays >= 0 && diffDays <= 3;
+
+}
+
+/* Wraps a formatted date with a small red "Due Soon" chip when the task
+   is due within 3 days. Used anywhere a plain displayDate() call is
+   shown for a due/expected date in a table or card. */
+function dueDateWithChip(task, dateField = "dueDate") {
+
+    const formatted = displayDate(task[dateField]);
+
+    if (!isDueSoon(task, dateField)) return formatted;
+
+    return `${formatted} <span class="due-soon-chip">Due Soon</span>`;
 
 }
 
@@ -2962,6 +3244,7 @@ function openBacklogItemModal(item = null) {
         setInput("backlogDepartment", item.department);
         setInput("backlogStatus", item.status || "Future");
         setInput("backlogDescription", item.description);
+        setInput("backlogExpectedDate", item.expectedDate || "");
 
     } else {
 
@@ -2971,6 +3254,7 @@ function openBacklogItemModal(item = null) {
         setInput("backlogDepartment", "");
         setInput("backlogStatus", "Future");
         setInput("backlogDescription", "");
+        setInput("backlogExpectedDate", "");
 
     }
 
@@ -3003,6 +3287,7 @@ async function saveBacklogItemFromForm() {
         department: getInput("backlogDepartment"),
         status: getInput("backlogStatus") || "Future",
         description: getInput("backlogDescription"),
+        expectedDate: getInput("backlogExpectedDate"),
         updatedBy: currentUserLabel()
     };
 
@@ -3034,7 +3319,13 @@ function renderBacklog() {
         ? backlogTasks.filter(function(item) { return item.department === departmentFilterValue; })
         : backlogTasks;
 
-    const ordered = sortMineFirst(scoped, function(item) { return item.createdBy; });
+    /* Whichever backlog item has the nearest Expected Date / Period
+       surfaces first (Mine → Primary Department → Others, each sorted by
+       that date — same relevance ordering as All Tasks / Regular Tasks).
+       Items with no expected date, or a value that isn't a parseable
+       date (e.g. a loose period like "Q2 2026"), simply sort after ones
+       that do — see makeDateThenPriorityComparator. */
+    const ordered = orderByRelevance(scoped, { dateField: "expectedDate" });
 
     if (!ordered.length) {
         grid.innerHTML = departmentFilterValue
@@ -3047,15 +3338,18 @@ function renderBacklog() {
 
         const commentCount = getComments("backlog:" + item.backlogId).length;
         const statusClass = String(item.status || "Future").toLowerCase() === "paused" ? "status-paused" : "status-backlog";
+        const dueSoon = isDueSoon(item, "expectedDate");
+        const expectedDate = String(item.expectedDate || "").trim();
 
         return `
-            <div class="backlog-card" data-id="${escapeHtml(item.backlogId)}">
+            <div class="backlog-card${dueSoon ? " card-due-soon" : ""}" data-id="${escapeHtml(item.backlogId)}">
                 <div class="backlog-card-top">
                     <span class="backlog-status-chip ${statusClass}">${escapeHtml(item.status || "Future")}</span>
                     ${isPrivilegedUser() ? `<button type="button" class="table-action backlog-edit-button" data-id="${escapeHtml(item.backlogId)}">Edit</button>` : ""}
                 </div>
                 <h3>${escapeHtml(item.task)}</h3>
                 <p class="backlog-card-description">${escapeHtml(item.description || "No description yet.")}</p>
+                ${expectedDate ? `<div class="backlog-card-expected">Expected: ${escapeHtml(displayDate(expectedDate))}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</div>` : ""}
                 <div class="backlog-card-footer">
                     <span>${escapeHtml(item.department || "Unassigned")} · ${escapeHtml(displayDate(item.createdDate))}</span>
                     <span class="backlog-card-comment-count">💬 ${commentCount}</span>
@@ -3094,6 +3388,12 @@ function openBacklogDetailDrawer(id) {
     setText("backlogDetailCreatedDate", displayDate(item.createdDate));
     setText("backlogDetailDepartment", item.department ? "· " + item.department : "");
     setText("backlogDetailDescription", item.description || "No description yet.");
+
+    const expectedElement = document.getElementById("backlogDetailExpected");
+    if (expectedElement) {
+        const expectedDate = String(item.expectedDate || "").trim();
+        expectedElement.textContent = expectedDate ? ("· Expected " + displayDate(expectedDate)) : "";
+    }
 
     renderCommentsInto("backlog:" + id, document.getElementById("backlogDetailComments"));
 
@@ -3153,9 +3453,10 @@ function renderBookFair() {
     function buildCardHtml(task) {
 
         const priorityClass = "priority-border-" + String(task.priority || "").toLowerCase();
+        const dueSoon = isDueSoon(task);
 
         return `
-            <div class="bookfair-card ${priorityClass}" data-id="${escapeHtml(task.taskId)}">
+            <div class="bookfair-card ${priorityClass}${dueSoon ? " card-due-soon" : ""}" data-id="${escapeHtml(task.taskId)}">
                 <div class="bookfair-card-top">
                     <h3>${escapeHtml(task.task)}</h3>
                     ${priorityBadge(task.priority)}
@@ -3163,7 +3464,7 @@ function renderBookFair() {
                 <div class="bookfair-card-meta">
                     <span>${statusBadge(task.status, task)}</span>
                     <span>${escapeHtml(task.assignedTo || "Unassigned")}</span>
-                    <span>Due ${escapeHtml(displayDate(task.dueDate))}</span>
+                    <span>Due ${dueDateWithChip(task)}</span>
                 </div>
                 <div class="bookfair-checklist-mini">
                     <div class="detail-drawer-section-header">
