@@ -901,6 +901,7 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 .departments-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 
 .department-card {
+    will-change: transform;
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px;
     box-shadow: var(--shadow-sm); transition: transform 0.2s var(--ease-soft), box-shadow 0.2s var(--ease-soft), border-color .2s;
 }
@@ -1010,6 +1011,7 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 .regular-task-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; padding: 18px 20px; }
 
 .regular-task-card {
+    will-change: transform;
     border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; background: var(--surface-alt);
     transition: transform 0.2s var(--ease-soft), box-shadow 0.2s var(--ease-soft), border-color 0.2s;
     display: flex; flex-direction: column; gap: 12px;
@@ -1028,6 +1030,17 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 }
 
 .regular-task-update-button:hover { background: var(--forest); color: white; transform: translateY(-1px); }
+
+.regular-task-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.regular-task-checklist-button {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-soft);
+    font-size: 11.5px; font-weight: 700; padding: 7px 14px; border-radius: 7px; cursor: pointer;
+    transition: background-color 0.15s var(--ease-soft), color 0.15s var(--ease-soft), border-color 0.15s var(--ease-soft), transform 0.15s var(--ease-soft);
+}
+
+.regular-task-checklist-button:hover { background: var(--surface-alt); border-color: var(--forest-mid); color: var(--forest); transform: translateY(-1px); }
 
 .regular-task-update-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .regular-task-update-modal-overlay { position: absolute; inset: 0; background: rgba(13, 43, 28, 0.55); backdrop-filter: blur(3px); animation: overlay-in 0.25s var(--ease-soft) both; }
@@ -1203,6 +1216,7 @@ tr.row-clickable:hover { background: var(--surface-alt); }
 }
 
 .backlog-card {
+    will-change: transform;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -1272,6 +1286,10 @@ tr.row-clickable:hover { background: var(--surface-alt); }
 
 .backlog-card-comment-count { display: flex; align-items: center; gap: 4px; font-weight: 700; color: var(--forest-mid); }
 
+.backlog-card-expected { font-size: 11.5px; color: var(--ink-soft); font-weight: 600; }
+
+.field-optional { font-weight: 400; color: var(--muted); text-transform: none; letter-spacing: 0; }
+
 /* =========================================================
    BOOK FAIR GRID
 ========================================================= */
@@ -1283,6 +1301,7 @@ tr.row-clickable:hover { background: var(--surface-alt); }
 }
 
 .bookfair-card {
+    will-change: transform;
     background: var(--surface);
     border: 1px solid var(--border);
     border-left: 4px solid var(--border);
@@ -1391,7 +1410,7 @@ tr.row-clickable:hover { background: var(--surface-alt); }
 .detail-drawer-comments { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
 .detail-drawer-comments h3 { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
 
-.comment-thread { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; max-height: 260px; overflow-y: auto; }
+.comment-thread { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; max-height: 260px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
 .comment-bubble {
     background: var(--surface-alt);
@@ -1442,6 +1461,7 @@ tr.row-clickable:hover { background: var(--surface-alt); }
     background: var(--surface);
     box-shadow: var(--shadow-lg);
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     animation: drawer-in 0.3s var(--ease) both;
 }
 
@@ -1552,6 +1572,81 @@ body.modal-open { overflow: hidden; }
     color: var(--muted);
     letter-spacing: 0.3px;
     text-transform: uppercase;
+}
+
+/* =========================================================
+   DUE SOON (within 3 days) — red highlight
+   Distinct from Overdue (status-overdue badge, already past due):
+   this flags items that are *approaching* their due/expected date
+   so they can be prioritized before they slip. Color is paired
+   with an explicit "Due Soon" text chip rather than relying on
+   color alone.
+========================================================= */
+
+.due-soon-chip {
+    display: inline-block;
+    background: #fbe4e2;
+    color: var(--danger);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 999px;
+    margin-left: 4px;
+    white-space: nowrap;
+}
+
+tr.row-due-soon td { background: #fdf1ef; }
+tr.row-due-soon:hover td { background: #fbe3e0; }
+tr.row-due-soon td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+
+.card-due-soon {
+    border-color: var(--danger) !important;
+    background: #fdf1ef !important;
+}
+
+.bookfair-card.card-due-soon { border-left-color: var(--danger); }
+
+/* =========================================================
+   SKELETON LOADING (shimmer placeholders)
+   Shown while a table/grid's first batch of data is still
+   loading — smoother perceived load than a bare "Loading…"
+   line, and reuses the same shimmer gradient/animation already
+   defined for the login shell (shell-shimmer).
+========================================================= */
+
+.skeleton-row td { padding: 14px 16px; }
+
+.skeleton-bar {
+    height: 13px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--border-soft) 25%, var(--surface-alt) 37%, var(--border-soft) 63%);
+    background-size: 400% 100%;
+    animation: shell-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-bar-title { height: 15px; width: 55%; margin-bottom: 10px; }
+
+.skeleton-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+    padding: 18px 20px;
+}
+
+.skeleton-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-alt);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton-bar { animation: none; background-position: 0 0; }
 }
 /* =========================================================
    ACTION LOADER (mascot "Saving…" pill)
