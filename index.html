@@ -263,7 +263,7 @@
                     <div class="table-container">
                         <table>
                             <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th></tr></thead>
-                            <tbody id="recentTasksTable"><tr><td colspan="7" class="empty-table">Loading tasks...</td></tr></tbody>
+                            <tbody id="recentTasksTable"><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:80%;"></div></td></tr><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:65%;"></div></td></tr><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:72%;"></div></td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -289,8 +289,20 @@
                         <p>Complete and update your recurring operational tasks.</p>
                     </div>
                 </div>
+                <div class="filter-panel regular-tasks-filter-panel">
+                    <div class="filter-field">
+                        <label for="regularTasksDepartmentFilter">Department</label>
+                        <select id="regularTasksDepartmentFilter">
+                            <option value="__mine__">My Department</option>
+                            <option value="">All Departments</option>
+                        </select>
+                    </div>
+                </div>
                 <div id="regularTasksContainer" class="regular-tasks-container">
-                    <div class="regular-tasks-loading">Loading regular tasks...</div>
+                    <div class="skeleton-card-grid">
+                        <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:70%;"></div><div class="skeleton-bar" style="width:45%;"></div></div>
+                        <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:60%;"></div><div class="skeleton-bar" style="width:40%;"></div></div>
+                    </div>
                 </div>
             </section>
 
@@ -337,7 +349,7 @@
                     <div class="table-container">
                         <table>
                             <thead><tr><th>ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Checklist</th><th>Actions</th></tr></thead>
-                            <tbody id="allTasksTable"><tr><td colspan="9" class="empty-table">Loading tasks...</td></tr></tbody>
+                            <tbody id="allTasksTable"><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:85%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:70%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:78%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:60%;"></div></td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -361,7 +373,7 @@
                     <div class="table-container">
                         <table>
                             <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Follow-up Date</th><th>Last Action</th><th>Status</th></tr></thead>
-                            <tbody id="followupsTable"><tr><td colspan="7" class="empty-table">Loading follow-ups...</td></tr></tbody>
+                            <tbody id="followupsTable"><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:75%;"></div></td></tr><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:62%;"></div></td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -380,8 +392,10 @@
                 <div class="filter-panel">
                     <div class="filter-field"><label for="backlogDepartmentFilter">Department</label><select id="backlogDepartmentFilter"><option value="">All Departments</option></select></div>
                 </div>
-                <div id="backlogGrid" class="backlog-grid">
-                    <div class="empty-state">Loading backlog...</div>
+                <div id="backlogGrid" class="backlog-grid skeleton-card-grid">
+                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:80%;"></div><div class="skeleton-bar" style="width:55%;"></div></div>
+                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:65%;"></div><div class="skeleton-bar" style="width:40%;"></div></div>
+                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:72%;"></div><div class="skeleton-bar" style="width:48%;"></div></div>
                 </div>
             </section>
 
@@ -395,8 +409,9 @@
                     </div>
                     <button id="bookFairAddButton" class="primary-button" type="button">+ Add Task</button>
                 </div>
-                <div id="bookFairGrid" class="bookfair-grid">
-                    <div class="empty-state">Loading Book Fair tasks...</div>
+                <div id="bookFairGrid" class="bookfair-grid skeleton-card-grid">
+                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:78%;"></div><div class="skeleton-bar" style="width:50%;"></div></div>
+                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:60%;"></div><div class="skeleton-bar" style="width:42%;"></div></div>
                 </div>
             </section>
 
@@ -437,7 +452,7 @@
                     <div class="table-container">
                         <table>
                             <thead><tr><th>ID</th><th>Task</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Follow-up</th><th>Checklist</th><th>Action</th></tr></thead>
-                            <tbody id="departmentTasksTable"><tr><td colspan="9" class="empty-table">Loading tasks...</td></tr></tbody>
+                            <tbody id="departmentTasksTable"><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:80%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:66%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:73%;"></div></td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -454,7 +469,7 @@
                 </div>
                 <div class="panel">
                     <div id="activityTimeline" class="activity-timeline">
-                        <div class="empty-state">Loading activity...</div>
+                        <div class="skeleton-card-grid" style="padding:22px;"><div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:60%;"></div></div><div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:50%;"></div></div></div>
                     </div>
                 </div>
             </section>
@@ -694,6 +709,11 @@
                 </div>
 
                 <div class="form-group full-width">
+                    <label for="backlogExpectedDate">Expected Date / Period <span class="field-optional">(optional)</span></label>
+                    <input type="text" id="backlogExpectedDate" placeholder="e.g. 15 Jan 2027, or Q2 2026">
+                </div>
+
+                <div class="form-group full-width">
                     <label for="backlogDescription">Description</label>
                     <textarea id="backlogDescription" rows="4" placeholder="What is this task, and why is it parked?"></textarea>
                 </div>
@@ -720,6 +740,7 @@
                 <p class="detail-drawer-meta-line">
                     Created <strong id="backlogDetailCreatedDate">-</strong>
                     <span id="backlogDetailDepartment"></span>
+                    <span id="backlogDetailExpected"></span>
                 </p>
                 <p id="backlogDetailDescription" class="detail-drawer-static-description">-</p>
 
@@ -729,6 +750,36 @@
                     <form id="backlogDetailCommentForm" class="comment-form">
                         <textarea id="backlogDetailCommentInput" rows="2" placeholder="Add a comment..." required></textarea>
                         <button type="submit" class="primary-button">Post Comment</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- REGULAR TASK CHECKLIST DRAWER -->
+<div id="regularTaskChecklistDrawer" class="detail-drawer" style="display:none;">
+    <div class="detail-drawer-overlay" onclick="closeRegularTaskChecklistDrawer()"></div>
+    <div class="detail-drawer-panel detail-drawer-panel-single">
+        <button type="button" class="detail-drawer-close" onclick="closeRegularTaskChecklistDrawer()" aria-label="Close">×</button>
+
+        <div class="detail-drawer-body detail-drawer-body-single">
+            <div class="detail-drawer-main">
+                <span id="regularTaskChecklistStatusLabel" class="page-label">REGULAR TASK</span>
+                <h2 id="regularTaskChecklistTitle">Task name</h2>
+                <p class="detail-drawer-meta-line">
+                    <strong id="regularTaskChecklistDepartment">-</strong> · Expected <span id="regularTaskChecklistExpectedTime">-</span>
+                </p>
+
+                <div class="detail-drawer-checklist">
+                    <div class="detail-drawer-section-header">
+                        <h3>Checklist</h3>
+                        <span id="regularTaskChecklistProgress" class="checklist-progress">0/0</span>
+                    </div>
+                    <div id="regularTaskChecklistList" class="checklist-list"></div>
+                    <form id="regularTaskChecklistForm" class="checklist-add-form">
+                        <input type="text" id="regularTaskChecklistInput" placeholder="Add checklist item...">
+                        <button type="submit">+ Add</button>
                     </form>
                 </div>
             </div>
