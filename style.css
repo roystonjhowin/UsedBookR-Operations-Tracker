@@ -418,6 +418,19 @@ button, input, select, textarea {
 
 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
 
+/* -- password visibility toggle -- */
+.input-shell-password input { padding-right: 44px; }
+
+.password-toggle {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+    border: none; background: transparent; color: var(--muted); cursor: pointer; border-radius: 8px;
+    transition: color 0.15s var(--ease-soft), background-color 0.15s var(--ease-soft);
+}
+
+.password-toggle:hover { color: var(--forest-mid); background: var(--surface-alt); }
+.password-toggle svg { display: block; }
+
 .login-footer {
     position: relative;
     margin-top: 30px;
@@ -1115,6 +1128,93 @@ tbody tr:nth-child(8) { animation-delay: 0.23s; }
 .notification-body { display: flex; flex-direction: column; gap: 3px; }
 .notification strong { font-size: 13px; }
 .notification span { color: #cbd3ce; font-size: 11.5px; line-height: 1.4; }
+
+/* =========================================================
+   GLOBAL STATUS BANNER
+   Tells the user plainly when data is slow to arrive or failed
+   to load, instead of the app just looking blank/empty. Two
+   visual states: "loading" (informational) and "error" (with a
+   Retry button). Hidden entirely until one of those is active.
+========================================================= */
+
+.global-status-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 2500;
+    display: none; align-items: center; justify-content: center; gap: 14px;
+    padding: 10px 44px 10px 16px; text-align: center;
+    font-size: 12.5px; font-weight: 600; color: white;
+    background: var(--forest-mid);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+}
+
+.global-status-banner.show { display: flex; }
+.global-status-banner.is-error { background: var(--danger); }
+
+.global-status-banner-retry {
+    border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.12); color: white;
+    font-size: 11.5px; font-weight: 700; padding: 5px 12px; border-radius: 7px; cursor: pointer;
+    transition: background-color 0.15s var(--ease-soft);
+}
+
+.global-status-banner-retry:hover { background: rgba(255,255,255,0.25); }
+
+.global-status-banner-dismiss {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    border: none; background: transparent; color: rgba(255,255,255,0.85); font-size: 18px;
+    width: 26px; height: 26px; border-radius: 50%; cursor: pointer; line-height: 1;
+}
+
+.global-status-banner-dismiss:hover { background: rgba(255,255,255,0.18); }
+
+@media (max-width: 650px) {
+    .global-status-banner { font-size: 11.5px; padding: 9px 40px 9px 12px; }
+}
+
+/* =========================================================
+   INLINE LOAD-ERROR STATE
+   Used inside any list/table that failed to load (as opposed to
+   genuinely being empty), with its own Retry action so the user
+   isn't stuck looking at what could be mistaken for "no data".
+========================================================= */
+
+.load-error-state {
+    padding: 30px; text-align: center; color: var(--danger); background: #fdf1f1;
+    border: 1px solid #f3caca; border-radius: var(--radius-md);
+}
+
+.load-error-state p { margin-bottom: 12px; }
+
+.load-error-retry-button {
+    border: 1px solid var(--danger); background: white; color: var(--danger);
+    font-size: 12px; font-weight: 700; padding: 7px 16px; border-radius: 7px; cursor: pointer;
+    transition: background-color 0.15s var(--ease-soft), color 0.15s var(--ease-soft);
+}
+
+.load-error-retry-button:hover { background: var(--danger); color: white; }
+
+/* =========================================================
+   MY TASKS (Regular Tasks page)
+========================================================= */
+
+.my-tasks-panel { margin-bottom: 20px; }
+
+.my-tasks-list { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+
+.my-tasks-empty { padding: 10px 2px; color: var(--muted); font-size: 12.5px; }
+
+.my-task-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-alt);
+    cursor: pointer; transition: border-color 0.15s var(--ease-soft), transform 0.15s var(--ease-soft), box-shadow 0.15s var(--ease-soft);
+}
+
+.my-task-row:hover { border-color: var(--forest-mid); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+
+.my-task-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 180px; }
+.my-task-row-main strong { font-size: 13.5px; color: var(--ink); }
+.my-task-row-main span { font-size: 11px; color: var(--muted); }
+
+.my-task-row-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.my-task-row-meta span { font-size: 11px; color: var(--muted); }
 
 /* =========================================================
    RESPONSIVE
