@@ -61,8 +61,12 @@
 
                 <div class="form-group">
                     <label for="loginPassword">Password</label>
-                    <div class="input-shell">
+                    <div class="input-shell input-shell-password">
                         <input type="password" id="loginPassword" name="password" placeholder="Enter password" autocomplete="current-password" required>
+                        <button type="button" id="togglePasswordVisibility" class="password-toggle" aria-label="Show password" aria-pressed="false">
+                            <svg class="icon-eye" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            <svg class="icon-eye-off" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.6 21.6 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.6 21.6 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                        </button>
                     </div>
                 </div>
 
@@ -81,6 +85,14 @@
 
 <!-- APPLICATION -->
 <div id="app" class="app" style="display:none;">
+
+    <!-- GLOBAL STATUS BANNER: tells the user when data is slow to load
+         or failed to load, instead of the screen just looking blank. -->
+    <div id="globalStatusBanner" class="global-status-banner" role="status" aria-live="polite">
+        <span id="globalStatusBannerText">Still loading your data — this can take a few seconds…</span>
+        <button id="globalStatusBannerRetry" class="global-status-banner-retry" type="button" style="display:none;">Retry</button>
+        <button id="globalStatusBannerDismiss" class="global-status-banner-dismiss" type="button" aria-label="Dismiss">×</button>
+    </div>
 
     <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
 
@@ -289,6 +301,24 @@
                         <p>Complete and update your recurring operational tasks.</p>
                     </div>
                 </div>
+
+                <!-- MY TASKS: the logged-in user's own open items from All Tasks,
+                     shown above the recurring list below so nothing they're
+                     personally on the hook for gets missed. -->
+                <div class="panel my-tasks-panel">
+                    <div class="panel-header">
+                        <div>
+                            <span class="page-label">ASSIGNED TO YOU</span>
+                            <h3>My Tasks</h3>
+                        </div>
+                    </div>
+                    <div id="myTasksOnRegularPage" class="my-tasks-list">
+                        <div class="skeleton-card-grid">
+                            <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:60%;"></div></div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="filter-panel regular-tasks-filter-panel">
                     <div class="filter-field">
                         <label for="regularTasksDepartmentFilter">Department</label>
