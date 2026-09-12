@@ -1391,42 +1391,48 @@ function renderMyTasksOnRegularPage() {
     const container = document.getElementById("myTasksOnRegularPage");
     if (!container) return;
 
-    if (tasksLoadFailed && !tasks.length) {
+    if (regularTasksLoadFailed && !regularTasks.length) {
         container.innerHTML = `
             <div class="load-error-state">
-                <p>Unable to load your tasks.</p>
-                <button type="button" class="load-error-retry-button" onclick="loadTasks()">Retry</button>
+                <p>Unable to load your regular tasks.</p>
+                <button type="button" class="load-error-retry-button" onclick="loadRegularTasks()">Retry</button>
             </div>
         `;
         return;
     }
 
     if (!currentUser) {
-        container.innerHTML = `<div class="my-tasks-empty">Sign in to see your tasks.</div>`;
+        container.innerHTML = `<div class="my-tasks-empty">Sign in to see your regular tasks.</div>`;
         return;
     }
 
-    const mine = tasks
-        .filter(function (task) { return currentUserMatches(task.assignedTo) && task.status !== "Completed"; })
-        .sort(compareTasksByDueDateThenPriority);
+    const mine = regularTasks
+        .filter(function (task) { return currentUserMatches(task.assignedTo); })
+        .sort(makeDateThenPriorityComparator("expectedDate"));
 
     if (!mine.length) {
-        container.innerHTML = `<div class="my-tasks-empty">You have no open tasks assigned to you right now.</div>`;
+        container.innerHTML = `<div class="my-tasks-empty">No regular tasks are assigned to you right now.</div>`;
         return;
     }
 
     container.innerHTML = mine.map(function (task) {
 
+        const id = String(task.regularTaskId || "").trim();
+        const expectedDate = String(task.expectedDate || "").trim();
+        const dueSoon = isDueSoon(task, "expectedDate");
+
         return `
-            <div class="my-task-row row-clickable" data-id="${escapeHtml(task.taskId)}">
+            <div class="my-task-row row-clickable" data-id="${escapeHtml(id)}">
                 <div class="my-task-row-main">
                     <strong>${escapeHtml(task.task)}</strong>
-                    <span>${escapeHtml(task.department || "-")} · ${escapeHtml(task.taskId)}</span>
+                    <span>${escapeHtml(task.department || "-")} · ${escapeHtml(id)}</span>
                 </div>
                 <div class="my-task-row-meta">
                     ${priorityBadge(task.priority)}
-                    ${statusBadge(task.status, task)}
-                    <span>Due ${dueDateWithChip(task, "dueDate")}</span>
+                    ${task.expectedTime ? `<span>${escapeHtml(task.expectedTime)}</span>` : ""}
+                    ${expectedDate
+                        ? `<span>Expected ${escapeHtml(displayDate(expectedDate))}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</span>`
+                        : ""}
                 </div>
             </div>
         `;
@@ -1448,7 +1454,7 @@ function initializeMyTasksOnRegularPageDelegation() {
 
         const row = event.target.closest(".row-clickable");
         if (row && row.dataset.id) {
-            openTaskDetailDrawer(row.dataset.id);
+            openRegularTaskUpdate(row.dataset.id);
         }
 
     });
