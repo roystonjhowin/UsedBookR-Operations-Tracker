@@ -57,6 +57,41 @@ function batchRows(container, items, buildNode) {
 }
 
 /* =========================================================
+   LOCAL CACHE (stale-while-revalidate)
+   Google Apps Script round trips are slow enough that waiting
+   for a fresh fetch on every single page load/refresh is what
+   made the app feel sluggish and sometimes look blank. Instead,
+   the last successful response for each dataset is kept in
+   sessionStorage: on load we paint that immediately (usually
+   instant, since it's just localStorage-speed JSON parsing),
+   then quietly fetch a fresh copy in the background and update
+   once it arrives. If the fresh fetch fails, we simply keep
+   showing the last good data (flagged via the banner) instead
+   of wiping the screen to empty.
+========================================================= */
+
+const CACHE_PREFIX = "usedbookrCache:";
+
+function saveCache(key, data) {
+    try {
+        sessionStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ data: data, savedAt: Date.now() }));
+    } catch (error) {
+        // sessionStorage full/unavailable (e.g. private browsing) — caching
+        // is a nice-to-have, not a hard requirement, so just skip it.
+    }
+}
+
+function readCache(key) {
+    try {
+        const raw = sessionStorage.getItem(CACHE_PREFIX + key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (error) {
+        return null;
+    }
+}
+
+/* =========================================================
    SKELETON LOADERS
    Lightweight shimmer placeholders shown while a table/grid's
    first batch of data is still loading, instead of a bare
@@ -100,6 +135,8 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeTaskForm();
     initializeLogout();
     initializeLogin();
+    initializePasswordToggle();
+    initializeGlobalStatusBanner();
     initializeRegularTaskUpdateForm();
     initializeExports();
     initializeSidebarToggle();
@@ -114,6 +151,7 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeRegularTasksFilter();
     initializeRegularTasksDelegation();
     initializeRegularTaskChecklistDrawer();
+    initializeMyTasksOnRegularPageDelegation();
 
 });
 
@@ -216,19 +254,12 @@ function initializeLogin() {
 
             hideLogin();
             updateLoggedInUserProfile();
-
-            // These are independent reads, so fire them together instead of
-            // waiting on one before starting the next — on Google Apps
-            // Script's backend this alone cuts first-load time roughly 4-5x.
-            await Promise.all([
-                loadTasks(),
-                loadRegularTasks(),
-                loadAllChecklists(),
-                loadAllComments(),
-                loadBacklogTasks()
-            ]);
-
             applyUserAccess();
+
+            // Fires all core reads together (rather than one after another)
+            // and now actually checks whether any of them failed — see
+            // loadCoreData() — instead of assuming success and moving on.
+            await loadCoreData();
 
         }
         catch (err) {
@@ -244,6 +275,39 @@ function initializeLogin() {
         finally {
             setButtonLoading(submitButton, false);
         }
+
+    });
+
+}
+
+/* =========================================================
+   PASSWORD VISIBILITY TOGGLE
+========================================================= */
+
+function initializePasswordToggle() {
+
+    const toggle = document.getElementById("togglePasswordVisibility");
+    const input = document.getElementById("loginPassword");
+
+    if (!toggle || !input) return;
+
+    const eyeIcon = toggle.querySelector(".icon-eye");
+    const eyeOffIcon = toggle.querySelector(".icon-eye-off");
+
+    toggle.addEventListener("click", function () {
+
+        const isCurrentlyHidden = input.type === "password";
+
+        input.type = isCurrentlyHidden ? "text" : "password";
+
+        toggle.setAttribute("aria-pressed", String(isCurrentlyHidden));
+        toggle.setAttribute("aria-label", isCurrentlyHidden ? "Hide password" : "Show password");
+
+        if (eyeIcon) eyeIcon.style.display = isCurrentlyHidden ? "none" : "";
+        if (eyeOffIcon) eyeOffIcon.style.display = isCurrentlyHidden ? "" : "none";
+
+        // Keep focus + cursor position in the field after toggling.
+        input.focus();
 
     });
 
@@ -280,12 +344,8 @@ function checkLogin() {
 
             hideLogin();
             updateLoggedInUserProfile();
-            loadTasks();
-            loadRegularTasks();
-            loadAllChecklists();
-            loadAllComments();
-            loadBacklogTasks();
             applyUserAccess();
+            loadCoreData();
 
         }
         catch (error) {
@@ -295,6 +355,42 @@ function checkLogin() {
 
     } else {
         showLogin();
+    }
+
+}
+
+/* =========================================================
+   LOAD CORE DATA
+   Runs every data load the app needs on startup (or after
+   login) together, and — unlike firing five independent async
+   calls and never checking their outcome — actually notices if
+   any of them failed. If the essentials (Master Tasks or
+   Regular Tasks) couldn't be loaded, this surfaces a clear
+   "couldn't load your data" banner with a Retry button instead
+   of quietly leaving the screen looking blank/half-loaded.
+========================================================= */
+
+async function loadCoreData() {
+
+    const results = await Promise.allSettled([
+        loadTasks(),
+        loadRegularTasks(),
+        loadAllChecklists(),
+        loadAllComments(),
+        loadBacklogTasks()
+    ]);
+
+    const anyRejected = results.some(function (r) { return r.status === "rejected"; });
+
+    if (anyRejected || tasksLoadFailed || regularTasksLoadFailed || backlogLoadFailed) {
+
+        showGlobalStatusBanner(
+            "Couldn't refresh some data just now — you may be viewing slightly outdated information.",
+            { isError: true, onRetry: loadCoreData }
+        );
+
+    } else {
+        hideGlobalStatusBanner();
     }
 
 }
@@ -386,6 +482,14 @@ function logoutUser() {
     // logged-in user's own primary department instead of keeping
     // whatever the previous session had selected.
     regularTasksFilterDefaulted = false;
+
+    // Reset "have we loaded this yet" flags so the next login's first
+    // loadTasks()/loadRegularTasks()/loadBacklogTasks() call is allowed
+    // to instant-paint from cache again (safe: filtering by user happens
+    // at render time, not at cache-write time).
+    tasksEverLoaded = false;
+    regularTasksEverLoaded = false;
+    backlogEverLoaded = false;
 
     sessionStorage.removeItem("usedbookrOperationsLogin");
     sessionStorage.removeItem("usedbookrCurrentUser");
@@ -587,7 +691,7 @@ function showPage(page) {
 
     if (page === "dashboard") updateDashboard();
     if (page === "tasks") renderTasksTable();
-    if (page === "regularTasks") renderRegularTasks();
+    if (page === "regularTasks") { renderRegularTasks(); renderMyTasksOnRegularPage(); }
     if (page === "followups") renderFollowups();
     if (page === "activity") renderActivity();
     if (page === "backlog") renderBacklog();
@@ -621,30 +725,176 @@ function updatePageHeader(page) {
    API
 ========================================================= */
 
+/* =========================================================
+   GLOBAL STATUS BANNER
+   A single, always-visible way to tell the user "still loading"
+   or "that failed" instead of the app just going quiet. Google
+   Apps Script backends can take several seconds to respond
+   (especially on a cold start), which previously showed no
+   feedback at all and looked like a blank/broken page.
+========================================================= */
+
+let globalStatusRetryHandler = null;
+
+function initializeGlobalStatusBanner() {
+
+    const dismissButton = document.getElementById("globalStatusBannerDismiss");
+    const retryButton = document.getElementById("globalStatusBannerRetry");
+
+    if (dismissButton) {
+        dismissButton.addEventListener("click", hideGlobalStatusBanner);
+    }
+
+    if (retryButton) {
+        retryButton.addEventListener("click", function () {
+            if (typeof globalStatusRetryHandler === "function") {
+                globalStatusRetryHandler();
+            }
+        });
+    }
+
+}
+
+function showGlobalStatusBanner(message, options = {}) {
+
+    const banner = document.getElementById("globalStatusBanner");
+    const text = document.getElementById("globalStatusBannerText");
+    const retryButton = document.getElementById("globalStatusBannerRetry");
+
+    if (!banner) return;
+
+    if (text) text.textContent = message;
+
+    banner.classList.toggle("is-error", !!options.isError);
+    banner.classList.add("show");
+
+    if (retryButton) {
+        if (options.onRetry) {
+            globalStatusRetryHandler = options.onRetry;
+            retryButton.style.display = "";
+        } else {
+            globalStatusRetryHandler = null;
+            retryButton.style.display = "none";
+        }
+    }
+
+}
+
+function hideGlobalStatusBanner() {
+
+    const banner = document.getElementById("globalStatusBanner");
+    if (banner) banner.classList.remove("show");
+
+    globalStatusRetryHandler = null;
+
+}
+
+/* =========================================================
+   API REQUEST
+   Improvements over a bare single-attempt fetch():
+   - A hard timeout (via AbortController) so a stalled request
+     doesn't hang forever with no feedback.
+   - A "still loading" banner if any request is taking longer
+     than a couple of seconds, so slow Apps Script responses
+     don't just look like a frozen/blank page.
+   - Automatic retry, but ONLY for network-level failures
+     (dropped connection, timeout) on actions that are safe to
+     repeat. Actions that CREATE a new row (createTask,
+     addChecklistItem, etc.) are never auto-retried, since
+     retrying a create after the first attempt actually
+     succeeded server-side would create a duplicate. This is
+     also why an update can occasionally still show "Connection
+     Error" even though it saved: the write reached Google
+     Sheets, but the response never made it back to the browser.
+     Read/update-style actions ARE safe to retry automatically,
+     which resolves most of that flakiness on its own.
+========================================================= */
+
+const NON_IDEMPOTENT_ACTIONS = new Set([
+    "createTask", "addTask", "createBacklogTask", "addChecklistItem",
+    "addTaskComment", "addBookFairChecklistItem", "moveBacklogToTask"
+]);
+
+const REQUEST_TIMEOUT_MS = 25000;
+const SLOW_REQUEST_NOTICE_MS = 3500;
+
+function wait(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
 async function apiRequest(action, data = {}) {
 
-    try {
+    const allowRetry = !NON_IDEMPOTENT_ACTIONS.has(action);
+    const maxAttempts = allowRetry ? 2 : 1;
 
-        const response = await fetch(API_URL, {
-            method: "POST",
-            headers: { "Content-Type": "text/plain;charset=utf-8" },
-            body: JSON.stringify({ action: action, ...data })
-        });
+    let lastError = null;
 
-        if (!response.ok) throw new Error("HTTP " + response.status);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 
-        const result = await response.json();
-        return result;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
+
+        const slowTimer = setTimeout(function () {
+            showGlobalStatusBanner("Still loading your data — Google Sheets is taking a bit longer than usual…");
+        }, SLOW_REQUEST_NOTICE_MS);
+
+        try {
+
+            const response = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "text/plain;charset=utf-8" },
+                body: JSON.stringify({ action: action, ...data }),
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+            clearTimeout(slowTimer);
+            hideGlobalStatusBanner();
+
+            if (!response.ok) throw new Error("HTTP " + response.status);
+
+            const result = await response.json();
+            return result;
+
+        }
+        catch (error) {
+
+            clearTimeout(timeoutId);
+            clearTimeout(slowTimer);
+            hideGlobalStatusBanner();
+
+            lastError = error;
+
+            // Only a dropped connection / abort is safe to retry — an actual
+            // error response from the server (e.g. a thrown Error surfaced
+            // as {success:false}) already came back fine and won't change
+            // on retry, so there's no point repeating it.
+            const isNetworkLevel = error.name === "AbortError" || error instanceof TypeError;
+
+            if (isNetworkLevel && attempt < maxAttempts) {
+                await wait(700 * attempt);
+                continue;
+            }
+
+            console.error("API Error:", action, error);
+
+            const message = error.name === "AbortError"
+                ? "The request took too long to respond. Your last action may still have saved — please check before repeating it."
+                : "Unable to connect to Google Sheets. Please check your connection and try again.";
+
+            if (!NON_IDEMPOTENT_ACTIONS.has(action) || isNetworkLevel) {
+                showNotification("Connection Issue", message);
+            } else {
+                showNotification("Connection Error", "Unable to connect to Google Sheets.");
+            }
+
+            return { success: false, message: message, networkError: isNetworkLevel };
+
+        }
 
     }
-    catch (error) {
 
-        console.error("API Error:", error);
-        showNotification("Connection Error", "Unable to connect to Google Sheets.");
-
-        return { success: false, message: error.message };
-
-    }
+    return { success: false, message: (lastError && lastError.message) || "Unknown error.", networkError: true };
 
 }
 
@@ -808,18 +1058,40 @@ function normalizeTasks(data) {
    LOAD TASKS
 ========================================================= */
 
+let tasksLoadFailed = false;
+let tasksEverLoaded = false;
+
 async function loadTasks() {
+
+    // Instant paint from the last known-good data (if any) so a refresh
+    // shows something immediately instead of a blank/skeleton screen while
+    // waiting on Google Sheets.
+    if (!tasksEverLoaded) {
+        const cached = readCache("tasks");
+        if (cached && Array.isArray(cached.data)) {
+            tasks = filterTasksForCurrentUser(normalizeTasks(cached.data));
+            updateAllViews();
+            renderMyTasksOnRegularPage();
+        }
+    }
 
     const result = await apiRequest("getTasks");
 
     if (result && result.success) {
-        const normalized = normalizeTasks(result.tasks || result.data || []);
-        tasks = filterTasksForCurrentUser(normalized);
+        const rawTasks = result.tasks || result.data || [];
+        tasks = filterTasksForCurrentUser(normalizeTasks(rawTasks));
+        tasksLoadFailed = false;
+        tasksEverLoaded = true;
+        saveCache("tasks", rawTasks);
     } else {
-        tasks = [];
+        // Keep whatever is already on screen (fresh or cached) rather than
+        // wiping it to empty — a failed refresh shouldn't destroy good data
+        // that's already visible. The global banner communicates the failure.
+        tasksLoadFailed = true;
     }
 
     updateAllViews();
+    renderMyTasksOnRegularPage();
 
 }
 
@@ -869,29 +1141,48 @@ function escapeHtml(value) {
    LOAD REGULAR TASKS
 ========================================================= */
 
+let regularTasksLoadFailed = false;
+let regularTasksEverLoaded = false;
+
 async function loadRegularTasks() {
 
     const container = document.getElementById("regularTasksContainer");
 
-    try {
+    // Instant paint from cache (first load only) instead of a skeleton,
+    // so a refresh shows the last known list right away.
+    if (!regularTasksEverLoaded) {
 
-        if (container) {
+        const cached = readCache("regularTasks");
+
+        if (cached && Array.isArray(cached.data) && cached.data.length) {
+            regularTasks = cached.data;
+            populateRegularTasksDepartmentFilter();
+            renderRegularTasks();
+        } else if (container) {
             container.innerHTML = `<div class="skeleton-card-grid">${skeletonCards(4)}</div>`;
         }
 
-        const response = await fetch(API_URL + "?action=getRegularTasks");
-        const result = await response.json();
+    }
 
+    try {
+
+        // Routed through apiRequest (instead of a bare fetch) so this gets
+        // the same timeout + automatic retry on dropped connections as
+        // every other read.
+        const result = await apiRequest("getRegularTasks");
 
         if (!result || !result.success) {
 
-            regularTasks = [];
+            regularTasksLoadFailed = true;
 
-            if (container) {
+            // Only replace the view with a hard error if we have nothing
+            // at all to show — otherwise keep the last good list on screen
+            // and let the global banner communicate the failed refresh.
+            if (!regularTasks.length && container) {
                 container.innerHTML = `
-                    <div class="regular-tasks-empty">
-                        Unable to load regular tasks.
-                        ${result?.message ? escapeHtml(result.message) : ""}
+                    <div class="load-error-state">
+                        <p>Unable to load regular tasks${result?.message ? ": " + escapeHtml(result.message) : "."}</p>
+                        <button type="button" class="load-error-retry-button" onclick="loadRegularTasks()">Retry</button>
                     </div>
                 `;
             }
@@ -900,8 +1191,10 @@ async function loadRegularTasks() {
 
         }
 
+        regularTasksLoadFailed = false;
+        regularTasksEverLoaded = true;
         regularTasks = Array.isArray(result.regularTasks) ? result.regularTasks : [];
-
+        saveCache("regularTasks", regularTasks);
 
         populateRegularTasksDepartmentFilter();
         renderRegularTasks();
@@ -911,10 +1204,15 @@ async function loadRegularTasks() {
 
         console.error("REGULAR TASKS ERROR:", error);
 
-        regularTasks = [];
+        regularTasksLoadFailed = true;
 
-        if (container) {
-            container.innerHTML = `<div class="regular-tasks-empty">Unable to load regular tasks. Please try again.</div>`;
+        if (!regularTasks.length && container) {
+            container.innerHTML = `
+                <div class="load-error-state">
+                    <p>Unable to load regular tasks. Please check your connection.</p>
+                    <button type="button" class="load-error-retry-button" onclick="loadRegularTasks()">Retry</button>
+                </div>
+            `;
         }
 
     }
@@ -1077,6 +1375,85 @@ function renderRegularTasks() {
     });
 
     container.innerHTML = html;
+
+}
+
+/* =========================================================
+   MY TASKS (shown above Regular Tasks)
+   Pulls from the Master Tasks list (`tasks`, already scoped by
+   filterTasksForCurrentUser) rather than the Regular Tasks sheet,
+   since "My Tasks" here means the person's own assigned work
+   across all departments, not the recurring checklist below it.
+========================================================= */
+
+function renderMyTasksOnRegularPage() {
+
+    const container = document.getElementById("myTasksOnRegularPage");
+    if (!container) return;
+
+    if (tasksLoadFailed && !tasks.length) {
+        container.innerHTML = `
+            <div class="load-error-state">
+                <p>Unable to load your tasks.</p>
+                <button type="button" class="load-error-retry-button" onclick="loadTasks()">Retry</button>
+            </div>
+        `;
+        return;
+    }
+
+    if (!currentUser) {
+        container.innerHTML = `<div class="my-tasks-empty">Sign in to see your tasks.</div>`;
+        return;
+    }
+
+    const mine = tasks
+        .filter(function (task) { return currentUserMatches(task.assignedTo) && task.status !== "Completed"; })
+        .sort(compareTasksByDueDateThenPriority);
+
+    if (!mine.length) {
+        container.innerHTML = `<div class="my-tasks-empty">You have no open tasks assigned to you right now.</div>`;
+        return;
+    }
+
+    container.innerHTML = mine.map(function (task) {
+
+        return `
+            <div class="my-task-row row-clickable" data-id="${escapeHtml(task.taskId)}">
+                <div class="my-task-row-main">
+                    <strong>${escapeHtml(task.task)}</strong>
+                    <span>${escapeHtml(task.department || "-")} · ${escapeHtml(task.taskId)}</span>
+                </div>
+                <div class="my-task-row-meta">
+                    ${priorityBadge(task.priority)}
+                    ${statusBadge(task.status, task)}
+                    <span>Due ${dueDateWithChip(task, "dueDate")}</span>
+                </div>
+            </div>
+        `;
+
+    }).join("");
+
+}
+
+let myTasksOnRegularPageDelegationReady = false;
+
+function initializeMyTasksOnRegularPageDelegation() {
+
+    if (myTasksOnRegularPageDelegationReady) return;
+
+    const container = document.getElementById("myTasksOnRegularPage");
+    if (!container) return;
+
+    container.addEventListener("click", function (event) {
+
+        const row = event.target.closest(".row-clickable");
+        if (row && row.dataset.id) {
+            openTaskDetailDrawer(row.dataset.id);
+        }
+
+    });
+
+    myTasksOnRegularPageDelegationReady = true;
 
 }
 
@@ -2476,10 +2853,29 @@ async function loadCommentsForTask(taskId) {
 
 }
 
+let backlogLoadFailed = false;
+let backlogEverLoaded = false;
+
 async function loadBacklogTasks() {
 
+    if (!backlogEverLoaded) {
+        const cached = readCache("backlogTasks");
+        if (cached && Array.isArray(cached.data)) {
+            backlogTasks = cached.data;
+        }
+    }
+
     const result = await apiRequest("getBacklog", {});
-    backlogTasks = (result && result.success && Array.isArray(result.tasks)) ? result.tasks : [];
+
+    if (result && result.success && Array.isArray(result.tasks)) {
+        backlogTasks = result.tasks;
+        backlogLoadFailed = false;
+        backlogEverLoaded = true;
+        saveCache("backlogTasks", backlogTasks);
+    } else {
+        // Keep whatever was already loaded/cached rather than clearing it.
+        backlogLoadFailed = true;
+    }
 
 }
 
@@ -3328,6 +3724,15 @@ function renderBacklog() {
     const ordered = orderByRelevance(scoped, { dateField: "expectedDate" });
 
     if (!ordered.length) {
+        if (backlogLoadFailed) {
+            grid.innerHTML = `
+                <div class="load-error-state">
+                    <p>Unable to load the backlog.</p>
+                    <button type="button" class="load-error-retry-button" onclick="loadBacklogTasks().then(renderBacklog)">Retry</button>
+                </div>
+            `;
+            return;
+        }
         grid.innerHTML = departmentFilterValue
             ? `<div class="empty-state">No backlog items for ${escapeHtml(departmentFilterValue)} yet.</div>`
             : `<div class="empty-state">No backlog items yet. Add future or paused work to keep track of it here.</div>`;
