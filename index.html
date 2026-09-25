@@ -5,14 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Excelso — Operations Management</title>
 
+    <!-- Start the Apps Script connection early so the first request is faster -->
+    <link rel="preconnect" href="https://script.google.com">
+    <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="style.css">
-    <!-- Logo is needed immediately on both the login screen and sidebar,
-         so preload it instead of letting the browser discover it late
-         from inside the CSS/HTML parse. -->
+    <link rel="stylesheet" href="enhancements.css">
     <link rel="preload" as="image" href="assets/logo-usedbookr.png">
 </head>
 <body>
@@ -86,8 +88,6 @@
 <!-- APPLICATION -->
 <div id="app" class="app" style="display:none;">
 
-    <!-- GLOBAL STATUS BANNER: tells the user when data is slow to load
-         or failed to load, instead of the screen just looking blank. -->
     <div id="globalStatusBanner" class="global-status-banner" role="status" aria-live="polite">
         <span id="globalStatusBannerText">Still loading your data — this can take a few seconds…</span>
         <button id="globalStatusBannerRetry" class="global-status-banner-retry" type="button" style="display:none;">Retry</button>
@@ -109,91 +109,31 @@
         <nav class="sidebar-navigation">
             <div class="navigation-title">MAIN</div>
 
-            <button class="nav-item active" data-page="dashboard">
-                <span class="nav-icon">▦</span><span>Dashboard</span>
-            </button>
-
-            <button class="nav-item" data-page="tasks">
-                <span class="nav-icon">✓</span><span>All Tasks</span>
-            </button>
-
-            <button class="nav-item" data-page="regularTasks">
-                <span class="nav-icon">↺</span><span>Regular Tasks</span>
-            </button>
-
-            <button class="nav-item" data-page="followups">
-                <span class="nav-icon">↻</span><span>Follow-ups</span>
-            </button>
-
-            <button class="nav-item" data-page="backlog">
-                <span class="nav-icon">▤</span><span>Backlog</span>
-            </button>
-
-            <button class="nav-item" data-page="bookFair">
-                <span class="nav-icon">◆</span><span>Book Fair</span>
-            </button>
+            <button class="nav-item active" data-page="dashboard"><span class="nav-icon">▦</span><span>Dashboard</span></button>
+            <button class="nav-item" data-page="tasks"><span class="nav-icon">✓</span><span>All Tasks</span></button>
+            <button class="nav-item" data-page="regularTasks"><span class="nav-icon">↺</span><span>Regular Tasks</span></button>
+            <button class="nav-item" data-page="followups"><span class="nav-icon">↻</span><span>Follow-ups</span></button>
+            <button class="nav-item" data-page="backlog"><span class="nav-icon">▤</span><span>Backlog</span></button>
+            <button class="nav-item" data-page="bookFair"><span class="nav-icon">◆</span><span>Book Fair</span></button>
 
             <div class="navigation-title">DEPARTMENTS</div>
 
-            <button class="nav-item department-item" data-department="B2B - Sales">
-                <span class="department-code">B2B</span><span>B2B / Sales</span>
-            </button>
+            <button class="nav-item department-item" data-department="B2B - Sales"><span class="department-code">B2B</span><span>B2B / Sales</span></button>
+            <button class="nav-item department-item" data-department="Customer Support"><span class="department-code">CS</span><span>Customer Support</span></button>
+            <button class="nav-item department-item" data-department="Warehouse"><span class="department-code">WH</span><span>Warehouse</span></button>
+            <button class="nav-item department-item" data-department="Scanning - Catalog"><span class="department-code">SC</span><span>Scanning / Catalog</span></button>
+            <button class="nav-item department-item" data-department="Listing - Inventory"><span class="department-code">LI</span><span>Listing / Inventory</span></button>
+            <button class="nav-item department-item" data-department="Digital Marketing"><span class="department-code">DM</span><span>Digital Marketing</span></button>
+            <button class="nav-item department-item" data-department="IT - Software Development"><span class="department-code">IT</span><span>IT / Software Development</span></button>
+            <button class="nav-item department-item" data-department="Finance"><span class="department-code">FN</span><span>Finance</span></button>
+            <button class="nav-item department-item" data-department="Book Fair - Events"><span class="department-code">BF</span><span>Book Fair / Events</span></button>
+            <button class="nav-item department-item" data-department="Books and Supply Procurement"><span class="department-code">BP</span><span>Books & Supply Procurement</span></button>
+            <button class="nav-item department-item" data-department="HR"><span class="department-code">HR</span><span>HR</span></button>
+            <button class="nav-item department-item" data-department="Data Analysis"><span class="department-code">DA</span><span>Data Analysis</span></button>
+            <button class="nav-item department-item" data-department="Software Testing"><span class="department-code">ST</span><span>Software Testing</span></button>
+            <button class="nav-item department-item" data-department="Product Development"><span class="department-code">PD</span><span>Product Development</span></button>
 
-            <button class="nav-item department-item" data-department="Customer Support">
-                <span class="department-code">CS</span><span>Customer Support</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Warehouse">
-                <span class="department-code">WH</span><span>Warehouse</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Scanning - Catalog">
-                <span class="department-code">SC</span><span>Scanning / Catalog</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Listing - Inventory">
-                <span class="department-code">LI</span><span>Listing / Inventory</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Digital Marketing">
-                <span class="department-code">DM</span><span>Digital Marketing</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="IT - Software Development">
-                <span class="department-code">IT</span><span>IT / Software Development</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Finance">
-                <span class="department-code">FN</span><span>Finance</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Book Fair - Events">
-                <span class="department-code">BF</span><span>Book Fair / Events</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Books and Supply Procurement">
-                <span class="department-code">BP</span><span>Books & Supply Procurement</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="HR">
-                <span class="department-code">HR</span><span>HR</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Data Analysis">
-                <span class="department-code">DA</span><span>Data Analysis</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Software Testing">
-                <span class="department-code">ST</span><span>Software Testing</span>
-            </button>
-
-            <button class="nav-item department-item" data-department="Product Development">
-                <span class="department-code">PD</span><span>Product Development</span>
-            </button>
-
-            <button class="nav-item" data-page="activity">
-                <span class="nav-icon">◷</span><span>Activity Log</span>
-            </button>
+            <button class="nav-item" data-page="activity"><span class="nav-icon">◷</span><span>Activity Log</span></button>
         </nav>
 
         <div class="sidebar-footer">
@@ -204,9 +144,7 @@
                     <span id="loggedUserRole">UsedBookR/SimplySellBooks</span>
                 </div>
             </div>
-            <button id="logoutButton" class="logout-button">
-                <span aria-hidden="true">&#10148;</span> Logout
-            </button>
+            <button id="logoutButton" class="logout-button"><span aria-hidden="true">&#10148;</span> Logout</button>
         </div>
     </aside>
 
@@ -214,9 +152,7 @@
     <main class="main-content">
         <header class="topbar">
             <div class="topbar-left">
-                <button id="menuToggle" class="menu-toggle" type="button" aria-label="Toggle navigation">
-                    <span></span><span></span><span></span>
-                </button>
+                <button id="menuToggle" class="menu-toggle" type="button" aria-label="Toggle navigation"><span></span><span></span><span></span></button>
                 <div>
                     <h1 id="pageTitle">Operations Dashboard</h1>
                     <p id="pageSubtitle">Centralized operational monitoring</p>
@@ -236,16 +172,16 @@
                     <div>
                         <span class="page-label">OVERVIEW</span>
                         <h2>Operations Dashboard</h2>
-                        <p>Monitor tasks, priorities, follow-ups and performance across all 14 departments.</p>
+                        <p id="dashboardScopeText">Monitor tasks, priorities and follow-ups across all 14 departments.</p>
                     </div>
                     <button id="dashboardAddTask" class="primary-button" type="button">+ Add New Task</button>
                 </div>
 
                 <div class="kpi-grid">
-                    <div class="kpi-card kpi-total"><span>Total Tasks</span><strong id="totalTasks">0</strong><small>All departments</small></div>
+                    <div class="kpi-card kpi-total"><span>Total Tasks</span><strong id="totalTasks">0</strong><small id="totalTasksScope">All departments</small></div>
                     <div class="kpi-card kpi-open"><span>Open</span><strong id="openTasks">0</strong><small>Not started</small></div>
                     <div class="kpi-card kpi-progress"><span>In Progress</span><strong id="progressTasks">0</strong><small>Currently working</small></div>
-                    <div class="kpi-card kpi-blocked"><span>Blocked</span><strong id="blockedTasks">0</strong><small>Need attention</small></div>
+                    <div class="kpi-card kpi-onhold"><span>On Hold</span><strong id="onHoldTasks">0</strong><small>Paused for now</small></div>
                     <div class="kpi-card kpi-overdue"><span>Overdue</span><strong id="overdueTasks">0</strong><small>Past due date</small></div>
                     <div class="kpi-card kpi-completed"><span>Completed</span><strong id="completedTasks">0</strong><small>Closed tasks</small></div>
                 </div>
@@ -274,8 +210,8 @@
                     <div class="panel-header"><div><h3>Recent Tasks</h3><p>Latest operational updates</p></div></div>
                     <div class="table-container">
                         <table>
-                            <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th></tr></thead>
-                            <tbody id="recentTasksTable"><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:80%;"></div></td></tr><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:65%;"></div></td></tr><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:72%;"></div></td></tr></tbody>
+                            <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Owners</th><th>Priority</th><th>Status</th><th>Due Date</th></tr></thead>
+                            <tbody id="recentTasksTable"><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:80%;"></div></td></tr><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:65%;"></div></td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -287,13 +223,13 @@
                         <p>Excelso is the operational backbone connecting UsedbookR.com and SimplySellBooks — every task logged here keeps books moving from buy to resell and back again.</p>
                     </div>
                     <div class="ecosystem-image">
-                        <img src="assets/logo-cycle.png" alt="Buy, Read, Resell, Repeat — UsedBookR and SimplySellBooks ecosystem">
+                        <img src="assets/logo-cycle.png" alt="Buy, Read, Resell, Repeat — UsedBookR and SimplySellBooks ecosystem" loading="lazy" decoding="async">
                     </div>
                 </div>
             </section>
 
             <!-- REGULAR TASKS -->
-            <section id="regularTasksPage" class="page" data-page="regularTasks">
+            <section id="regularTasksPage" class="page">
                 <div class="page-header">
                     <div>
                         <span class="page-label">RECURRING WORK</span>
@@ -302,32 +238,14 @@
                     </div>
                 </div>
 
-                <!-- MY TASKS: the logged-in user's own open items from All Tasks,
-                     shown above the recurring list below so nothing they're
-                     personally on the hook for gets missed. -->
-                <div class="panel my-tasks-panel">
-                    <div class="panel-header">
-                        <div>
-                            <span class="page-label">ASSIGNED TO YOU</span>
-                            <h3>My Tasks</h3>
-                        </div>
-                    </div>
-                    <div id="myTasksOnRegularPage" class="my-tasks-list">
-                        <div class="skeleton-card-grid">
-                            <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:60%;"></div></div>
-                        </div>
+                <!-- Only shown to Founder / Operations Head -->
+                <div id="regularTasksFilterPanel" class="filter-panel regular-tasks-filter-panel" style="display:none;">
+                    <div class="filter-field">
+                        <label for="regularTasksDepartmentFilter">Department</label>
+                        <select id="regularTasksDepartmentFilter"><option value="">All Departments</option></select>
                     </div>
                 </div>
 
-                <div class="filter-panel regular-tasks-filter-panel">
-                    <div class="filter-field">
-                        <label for="regularTasksDepartmentFilter">Department</label>
-                        <select id="regularTasksDepartmentFilter">
-                            <option value="__mine__">My Department</option>
-                            <option value="">All Departments</option>
-                        </select>
-                    </div>
-                </div>
                 <div id="regularTasksContainer" class="regular-tasks-container">
                     <div class="skeleton-card-grid">
                         <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:70%;"></div><div class="skeleton-bar" style="width:45%;"></div></div>
@@ -342,7 +260,7 @@
                     <div>
                         <span class="page-label">TASK MANAGEMENT</span>
                         <h2>All Tasks</h2>
-                        <p>Manage tasks across all departments.</p>
+                        <p id="tasksScopeText">Manage tasks across all departments.</p>
                     </div>
                     <div class="page-header-actions">
                         <button id="exportTasksButton" class="secondary-button" type="button">⭳ Export CSV</button>
@@ -368,7 +286,7 @@
                             <option value="">All Statuses</option>
                             <option value="Open">Open</option>
                             <option value="In Progress">In Progress</option>
-                            <option value="Blocked">Blocked</option>
+                            <option value="On Hold">On Hold</option>
                             <option value="Completed">Completed</option>
                             <option value="Overdue">Overdue</option>
                         </select>
@@ -378,8 +296,8 @@
                 <div class="panel">
                     <div class="table-container">
                         <table>
-                            <thead><tr><th>ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Checklist</th><th>Actions</th></tr></thead>
-                            <tbody id="allTasksTable"><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:85%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:70%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:78%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:60%;"></div></td></tr></tbody>
+                            <thead><tr><th>ID</th><th>Task</th><th>Department</th><th>Owners</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Checklist</th><th>Actions</th></tr></thead>
+                            <tbody id="allTasksTable"><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:85%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:70%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:60%;"></div></td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -402,8 +320,8 @@
                 <div class="panel">
                     <div class="table-container">
                         <table>
-                            <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Assigned To</th><th>Follow-up Date</th><th>Last Action</th><th>Status</th></tr></thead>
-                            <tbody id="followupsTable"><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:75%;"></div></td></tr><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:62%;"></div></td></tr></tbody>
+                            <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Owners</th><th>Follow-up Date</th><th>Last Action</th><th>Status</th></tr></thead>
+                            <tbody id="followupsTable"><tr class="skeleton-row"><td colspan="7"><div class="skeleton-bar" style="width:75%;"></div></td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -423,9 +341,8 @@
                     <div class="filter-field"><label for="backlogDepartmentFilter">Department</label><select id="backlogDepartmentFilter"><option value="">All Departments</option></select></div>
                 </div>
                 <div id="backlogGrid" class="backlog-grid skeleton-card-grid">
-                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:80%;"></div><div class="skeleton-bar" style="width:55%;"></div></div>
-                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:65%;"></div><div class="skeleton-bar" style="width:40%;"></div></div>
-                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:72%;"></div><div class="skeleton-bar" style="width:48%;"></div></div>
+                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:80%;"></div></div>
+                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:65%;"></div></div>
                 </div>
             </section>
 
@@ -435,13 +352,12 @@
                     <div>
                         <span class="page-label">EVENTS</span>
                         <h2>Book Fair</h2>
-                        <p>Book Fair / Events tasks — priority tasks appear first, each with its own checklist.</p>
+                        <p>Book Fair / Events tasks, each with its own checklist.</p>
                     </div>
                     <button id="bookFairAddButton" class="primary-button" type="button">+ Add Task</button>
                 </div>
                 <div id="bookFairGrid" class="bookfair-grid skeleton-card-grid">
-                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:78%;"></div><div class="skeleton-bar" style="width:50%;"></div></div>
-                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:60%;"></div><div class="skeleton-bar" style="width:42%;"></div></div>
+                    <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:78%;"></div></div>
                 </div>
             </section>
 
@@ -472,17 +388,17 @@
                     <div class="kpi-card"><span>Total Tasks</span><strong id="departmentTotal">0</strong></div>
                     <div class="kpi-card"><span>Open</span><strong id="departmentOpen">0</strong></div>
                     <div class="kpi-card"><span>In Progress</span><strong id="departmentProgress">0</strong></div>
-                    <div class="kpi-card"><span>Blocked</span><strong id="departmentBlocked">0</strong></div>
+                    <div class="kpi-card"><span>On Hold</span><strong id="departmentOnHold">0</strong></div>
                     <div class="kpi-card"><span>Overdue</span><strong id="departmentOverdue">0</strong></div>
                     <div class="kpi-card"><span>Completed</span><strong id="departmentCompleted">0</strong></div>
                 </div>
 
                 <div class="panel">
-                    <div class="panel-header"><div><h3>Department Tasks</h3><p>Tasks assigned to this department.</p></div></div>
+                    <div class="panel-header"><div><h3>Department Tasks</h3><p id="departmentTasksScopeText">Tasks assigned to this department.</p></div></div>
                     <div class="table-container">
                         <table>
-                            <thead><tr><th>ID</th><th>Task</th><th>Assigned To</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Follow-up</th><th>Checklist</th><th>Action</th></tr></thead>
-                            <tbody id="departmentTasksTable"><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:80%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:66%;"></div></td></tr><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:73%;"></div></td></tr></tbody>
+                            <thead><tr><th>ID</th><th>Task</th><th>Owners</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Follow-up</th><th>Checklist</th><th>Action</th></tr></thead>
+                            <tbody id="departmentTasksTable"><tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:80%;"></div></td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -498,9 +414,7 @@
                     </div>
                 </div>
                 <div class="panel">
-                    <div id="activityTimeline" class="activity-timeline">
-                        <div class="skeleton-card-grid" style="padding:22px;"><div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:60%;"></div></div><div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:50%;"></div></div></div>
-                    </div>
+                    <div id="activityTimeline" class="activity-timeline"></div>
                 </div>
             </section>
         </div>
@@ -509,18 +423,23 @@
 
 <!-- TASK MODAL -->
 <div id="taskModal" class="modal-overlay" style="display:none;">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
         <div class="modal-header">
             <div><span class="modal-label">TASK</span><h2 id="taskModalTitle">Add New Task</h2></div>
             <button id="closeTaskModal" class="modal-close" type="button" aria-label="Close">×</button>
         </div>
 
-        <form id="taskForm">
+        <form id="taskForm" novalidate>
             <input type="hidden" id="editTaskId">
             <div class="form-grid">
                 <div class="form-group full-width">
                     <label for="taskName">Task *</label>
                     <input type="text" id="taskName" placeholder="Enter task" required>
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="taskDescription">Description</label>
+                    <textarea id="taskDescription" rows="3" placeholder="What needs to be done, and what does done look like?"></textarea>
                 </div>
 
                 <div class="form-group">
@@ -529,8 +448,9 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="taskAssignedTo">Assigned To *</label>
-                    <input type="text" id="taskAssignedTo" placeholder="Responsible person" required>
+                    <label id="taskOwnersLabel">Owners *</label>
+                    <!-- Filled from the Users sheet. Pick one or more people. -->
+                    <div id="taskOwnerPicker" class="owner-picker" aria-labelledby="taskOwnersLabel"></div>
                 </div>
 
                 <div class="form-group">
@@ -547,25 +467,27 @@
                     <select id="taskStatus" required>
                         <option value="Open">Open</option>
                         <option value="In Progress">In Progress</option>
-                        <option value="Blocked">Blocked</option>
+                        <option value="On Hold">On Hold</option>
                         <option value="Completed">Completed</option>
                     </select>
                 </div>
 
-                <div class="form-group"><label for="taskCreatedDate">Created Date</label><input type="date" id="taskCreatedDate"></div>
+                <div class="form-group"><label for="taskCreatedDate">Created Date</label><input type="date" id="taskCreatedDate" disabled></div>
                 <div class="form-group"><label for="taskDueDate">Due Date *</label><input type="date" id="taskDueDate" required></div>
                 <div class="form-group"><label for="taskFollowupDate">Follow-up Date</label><input type="date" id="taskFollowupDate"></div>
 
                 <div class="form-group full-width">
                     <label for="taskFollowupAction">Follow-up / Action Taken</label>
-                    <textarea id="taskFollowupAction" rows="4" placeholder="Record calls, messages, meetings or actions taken..."></textarea>
+                    <textarea id="taskFollowupAction" rows="3" placeholder="Record calls, messages, meetings or actions taken..."></textarea>
                 </div>
 
                 <div class="form-group full-width">
                     <label for="taskRemarks">Remarks</label>
-                    <textarea id="taskRemarks" rows="4" placeholder="Additional information, dependencies or notes..."></textarea>
+                    <textarea id="taskRemarks" rows="3" placeholder="Additional information, dependencies or notes..."></textarea>
                 </div>
             </div>
+
+            <div id="taskFormError" class="form-inline-error" role="alert"></div>
 
             <div class="modal-footer">
                 <button type="button" id="cancelTaskButton" class="secondary-button">Cancel</button>
@@ -616,7 +538,7 @@
     </div>
 </div>
 
-<!-- TASK DETAIL DRAWER (All Tasks / Master Tasks / Book Fair) -->
+<!-- TASK DETAIL DRAWER -->
 <div id="taskDetailDrawer" class="detail-drawer" style="display:none;">
     <div class="detail-drawer-overlay" onclick="closeTaskDetailDrawer()"></div>
     <div class="detail-drawer-panel">
@@ -629,7 +551,7 @@
                 <h2 id="taskDetailName">Task name</h2>
 
                 <div class="detail-drawer-field">
-                    <label>Description</label>
+                    <label for="taskDetailDescription">Description</label>
                     <textarea id="taskDetailDescription" rows="3" placeholder="No description yet."></textarea>
                 </div>
 
@@ -658,20 +580,14 @@
             <aside class="detail-drawer-meta">
                 <span class="page-label">DETAILS</span>
 
+                <div class="meta-field"><label>Task ID</label><input type="text" id="taskDetailId" disabled></div>
+                <div class="meta-field"><label>Department</label><input type="text" id="taskDetailDepartment" disabled></div>
                 <div class="meta-field">
-                    <label>Task ID</label>
-                    <input type="text" id="taskDetailId" disabled>
+                    <label id="taskDetailOwnersLabel">Owners</label>
+                    <div id="taskDetailOwnerPicker" class="owner-picker owner-picker-compact" aria-labelledby="taskDetailOwnersLabel"></div>
                 </div>
                 <div class="meta-field">
-                    <label>Department</label>
-                    <input type="text" id="taskDetailDepartment" disabled>
-                </div>
-                <div class="meta-field">
-                    <label>Assigned To</label>
-                    <input type="text" id="taskDetailAssignedTo">
-                </div>
-                <div class="meta-field">
-                    <label>Priority</label>
+                    <label for="taskDetailPriority">Priority</label>
                     <select id="taskDetailPriority">
                         <option value="High">High</option>
                         <option value="Medium">Medium</option>
@@ -679,30 +595,21 @@
                     </select>
                 </div>
                 <div class="meta-field">
-                    <label>Status</label>
+                    <label for="taskDetailStatus">Status</label>
                     <select id="taskDetailStatus">
                         <option value="Open">Open</option>
                         <option value="In Progress">In Progress</option>
-                        <option value="Blocked">Blocked</option>
+                        <option value="On Hold">On Hold</option>
                         <option value="Completed">Completed</option>
                     </select>
                     <small class="meta-field-hint">Anyone with access can update status.</small>
                 </div>
-                <div class="meta-field">
-                    <label>Created Date</label>
-                    <input type="date" id="taskDetailCreatedDate" disabled>
-                </div>
-                <div class="meta-field">
-                    <label>Due Date</label>
-                    <input type="date" id="taskDetailDueDate">
-                </div>
-                <div class="meta-field">
-                    <label>Follow-up Date</label>
-                    <input type="date" id="taskDetailFollowupDate">
-                </div>
+                <div class="meta-field"><label>Created Date</label><input type="date" id="taskDetailCreatedDate" disabled></div>
+                <div class="meta-field"><label for="taskDetailDueDate">Due Date</label><input type="date" id="taskDetailDueDate"></div>
+                <div class="meta-field"><label for="taskDetailFollowupDate">Follow-up Date</label><input type="date" id="taskDetailFollowupDate"></div>
 
                 <button type="button" id="taskDetailSaveMetaButton" class="primary-button" style="display:none;">Save Changes</button>
-                <p id="taskDetailLockedNote" class="meta-locked-note">Only the Operations Head / Founder can edit assignment, priority and dates.</p>
+                <p id="taskDetailLockedNote" class="meta-locked-note">Only the Operations Head / Founder can edit owners, priority and dates.</p>
             </aside>
 
         </div>
@@ -795,7 +702,7 @@
 
         <div class="detail-drawer-body detail-drawer-body-single">
             <div class="detail-drawer-main">
-                <span id="regularTaskChecklistStatusLabel" class="page-label">REGULAR TASK</span>
+                <span class="page-label">REGULAR TASK</span>
                 <h2 id="regularTaskChecklistTitle">Task name</h2>
                 <p class="detail-drawer-meta-line">
                     <strong id="regularTaskChecklistDepartment">-</strong> · Expected <span id="regularTaskChecklistExpectedTime">-</span>
@@ -826,7 +733,7 @@
     </div>
 </div>
 
-<!-- ACTION LOADER (mini mascot shown while saving) -->
+<!-- ACTION LOADER -->
 <div id="actionLoader" class="action-loader" aria-live="polite">
     <div class="action-loader-mascot">
         <div class="action-loader-page action-loader-page-1"></div>
@@ -836,6 +743,6 @@
     <span id="actionLoaderText">Saving…</span>
 </div>
 
-<script src="script.js"></script>
+<script src="script.js" defer></script>
 </body>
 </html>
