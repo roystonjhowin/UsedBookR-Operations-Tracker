@@ -1,17 +1,15 @@
 /* =========================================================
-   EXCELSO OPERATIONS MANAGEMENT SYSTEM — FRONTEND  (v6)
+   EXCELSO OPERATIONS MANAGEMENT SYSTEM — FRONTEND  (v7)
 
-   Pairs with Code.gs v6. Main changes:
-   - Login returns a session token; every request carries it.
-   - One "bootstrap" request loads everything (was 5 requests).
-   - Non-admins see: My Tasks (any department) + a collapsible
-     "Others in <my department>" section, on All Tasks, Regular
-     Tasks and Book Fair.
-   - "Blocked" is now "On Hold".
-   - Owners are picked from a dropdown fed by the Users sheet,
-     and a task can have several owners.
-   - Checklist ticks, new checklist items, comments and status
-     changes update on screen instantly and save in the background.
+   Pairs with Code.gs v7. What's new:
+   - Stays signed in across tabs and after closing the browser
+     (until the server session ends after 6 hours of no use).
+   - Shows the last data instantly on open, then refreshes.
+   - Checks for other people's changes every minute while the tab
+     is open, and a ↻ button refreshes straight from the sheet.
+   - Tables turn into readable cards on phones; bottom tab bar on
+     phones; KPI cards are clickable shortcuts.
+   - Regular task cards show the latest update.
 ========================================================= */
 
 const API_URL =
@@ -36,12 +34,18 @@ const DEPARTMENTS = [
 
 const STATUS_ON_HOLD = "On Hold";
 
+const APP_VERSION = "7.0";
+
+const POLL_INTERVAL_MS = 60 * 1000;        // look for other people's changes every minute
+const REFOCUS_REFRESH_MS = 30 * 1000;      // refresh when you come back after 30 s+
+
 let tasks = [];
 let regularTasks = [];
 let backlogTasks = [];
 let allChecklists = {};   // taskId / regularTaskId -> [items]
 let allComments = {};     // taskId / backlogId -> [comments]
-let users = [];           // from the Users sheet (for the owner dropdown)
+let regularLatest = {};   // regularTaskId -> latest update
+let users = [];
 
 let currentUser = null;
 let sessionToken = "";
@@ -52,23 +56,42 @@ let currentPage = "dashboard";
 let dataEverLoaded = false;
 let dataLoadFailed = false;
 let lastLoadedAt = 0;
+let lastSignature = "";
 let coreLoadPromise = null;
+let pollTimer = null;
 
 let taskDetailCurrentId = "";
 let backlogDetailCurrentId = "";
 let regularTaskChecklistCurrentId = "";
 
-// Which "others" sections the person has opened/closed by hand, per page.
 const expandedSections = {};
 
-// Global switch in the top bar. Off (default) = only tasks you own,
-// everywhere. On = also other people's tasks you have access to.
 let showEveryone = false;
-
-const APP_VERSION = "6.3";
 
 let taskOwnerPicker = null;
 let taskDetailOwnerPicker = null;
+
+/* =========================================================
+   STORAGE — localStorage so you stay signed in across tabs,
+   falls back to sessionStorage if the browser blocks it.
+========================================================= */
+
+const store = (function () {
+    let backend = null;
+    try {
+        localStorage.setItem("__excelso_test", "1");
+        localStorage.removeItem("__excelso_test");
+        backend = localStorage;
+    } catch (e) {
+        try { backend = sessionStorage; } catch (e2) { backend = null; }
+    }
+    return {
+        get: function (key) { try { return backend ? backend.getItem(key) : null; } catch (e) { return null; } },
+        set: function (key, value) { try { if (backend) backend.setItem(key, value); } catch (e) { /* full */ } },
+        remove: function (key) { try { if (backend) backend.removeItem(key); } catch (e) { /* ignore */ } },
+        keys: function () { try { return backend ? Object.keys(backend) : []; } catch (e) { return []; } }
+    };
+})();
 
 /* =========================================================
    SMALL HELPERS
@@ -126,11 +149,29 @@ function tempId(prefix) {
     return "tmp-" + prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+function firstName(name) {
+    return String(name || "").replace(/^(mr|mrs|ms|dr)\.?\s*/i, "").trim().split(/\s+/)[0] || "";
+}
+
+/* Puts the column name on every table cell, so phones can show
+   each row as a small card ("Owners: Teja"). */
+function labelCells(tbody) {
+    const table = tbody && tbody.closest("table");
+    if (!table) return;
+    const heads = Array.from(table.querySelectorAll("thead th")).map(function (th) { return th.textContent.trim(); });
+    tbody.querySelectorAll("tr").forEach(function (tr) {
+        if (tr.classList.contains("table-section-row")) return;
+        Array.from(tr.children).forEach(function (td, i) {
+            if (!td.hasAttribute("colspan")) td.dataset.label = heads[i] || "";
+        });
+    });
+}
+
 /* =========================================================
-   LOCAL CACHE — instant paint on refresh, per user
+   LOCAL CACHE — instant paint on open, per user
 ========================================================= */
 
-const CACHE_PREFIX = "usedbookrCache6:";
+const CACHE_PREFIX = "usedbookrCache7:";
 
 function cacheKeyForUser() {
     return CACHE_PREFIX + String(currentUser?.username || "").toLowerCase();
@@ -138,26 +179,23 @@ function cacheKeyForUser() {
 
 function persistLocalCache() {
     if (!currentUser) return;
-    try {
-        sessionStorage.setItem(cacheKeyForUser(), JSON.stringify({
-            savedAt: Date.now(),
-            tasks: tasks,
-            regularTasks: regularTasks,
-            backlog: backlogTasks,
-            users: users,
-            checklists: allChecklists,
-            comments: allComments
-        }));
-    } catch (error) {
-        // storage full / private mode — caching is optional
-    }
+    store.set(cacheKeyForUser(), JSON.stringify({
+        savedAt: Date.now(),
+        tasks: tasks,
+        regularTasks: regularTasks,
+        backlog: backlogTasks,
+        users: users,
+        checklists: allChecklists,
+        comments: allComments,
+        regularLatest: regularLatest
+    }));
 }
 
 const persistLocalCacheSoon = debounce(persistLocalCache, 400);
 
 function readLocalCache() {
     try {
-        const raw = sessionStorage.getItem(cacheKeyForUser());
+        const raw = store.get(cacheKeyForUser());
         return raw ? JSON.parse(raw) : null;
     } catch (error) {
         return null;
@@ -165,11 +203,14 @@ function readLocalCache() {
 }
 
 function clearLocalCaches() {
+    store.keys().forEach(function (key) {
+        if (key.indexOf("usedbookrCache") === 0 || key.indexOf("usedbookrInsight") === 0) store.remove(key);
+    });
     try {
         Object.keys(sessionStorage).forEach(function (key) {
-            if (key.indexOf("usedbookrCache") === 0) sessionStorage.removeItem(key);
+            if (key.indexOf("usedbookr") === 0) sessionStorage.removeItem(key);
         });
-    } catch (error) { /* ignore */ }
+    } catch (e) { /* ignore */ }
 }
 
 /* =========================================================
@@ -212,39 +253,26 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeKeyboardShortcuts();
     initializeBackgroundRefresh();
     initializeScopeToggle();
+    initializeSyncButton();
+    initializeKpiShortcuts();
+    initializeMobileTabbar();
 
     console.info("Excelso frontend version " + APP_VERSION);
 
     checkLogin();
-    initializePageLoader();
+    hidePageLoader();
 
 });
 
-function initializePageLoader() {
-
-    const MIN_VISIBLE_MS = 300;
-    const FADE_MS = 300;
-    const start = Date.now();
-    let done = false;
-
-    const hide = function () {
-        if (done) return;
-        done = true;
-        const remaining = Math.max(0, MIN_VISIBLE_MS - (Date.now() - start));
-        setTimeout(function () {
-            const loader = document.getElementById("pageLoader");
-            if (!loader) return;
-            loader.classList.add("loader-hidden");
-            setTimeout(function () { loader.style.display = "none"; }, FADE_MS);
-        }, remaining);
-    };
-
-    if (document.readyState === "complete") hide();
-    else {
-        window.addEventListener("load", hide);
-        setTimeout(hide, 1200);
-    }
-
+/* [SPEED] Hide the splash as soon as the page is ready instead of
+   waiting for every font and image to finish downloading. */
+function hidePageLoader() {
+    const loader = document.getElementById("pageLoader");
+    if (!loader) return;
+    setTimeout(function () {
+        loader.classList.add("loader-hidden");
+        setTimeout(function () { loader.style.display = "none"; }, 300);
+    }, 150);
 }
 
 /* =========================================================
@@ -292,8 +320,8 @@ function initializeLogin() {
             currentUser = result.user;
             sessionToken = result.token;
 
-            sessionStorage.setItem("usedbookrCurrentUser", JSON.stringify(currentUser));
-            sessionStorage.setItem("usedbookrSessionToken", sessionToken);
+            store.set("usedbookrCurrentUser", JSON.stringify(currentUser));
+            store.set("usedbookrSessionToken", sessionToken);
 
             enterApp();
 
@@ -312,8 +340,20 @@ function initializeLogin() {
 
 function checkLogin() {
 
-    const savedUser = sessionStorage.getItem("usedbookrCurrentUser");
-    const savedToken = sessionStorage.getItem("usedbookrSessionToken");
+    let savedUser = store.get("usedbookrCurrentUser");
+    let savedToken = store.get("usedbookrSessionToken");
+
+    // Carry over a v6 session from this tab so nobody has to sign in again.
+    if (!savedToken) {
+        try {
+            savedUser = sessionStorage.getItem("usedbookrCurrentUser");
+            savedToken = sessionStorage.getItem("usedbookrSessionToken");
+            if (savedUser && savedToken) {
+                store.set("usedbookrCurrentUser", savedUser);
+                store.set("usedbookrSessionToken", savedToken);
+            }
+        } catch (e) { /* ignore */ }
+    }
 
     if (savedUser && savedToken) {
         try {
@@ -327,35 +367,41 @@ function checkLogin() {
         }
     }
 
-    // Old (pre-v6) sessions have no token — ask them to sign in once.
     logoutUser({ silent: true });
 
 }
 
 function enterApp() {
 
-    try { showEveryone = sessionStorage.getItem("usedbookrShowEveryone") === "1"; } catch (e) { showEveryone = false; }
+    showEveryone = store.get("usedbookrShowEveryone") === "1";
     updateScopeToggle();
 
     hideLogin();
     updateLoggedInUserProfile();
     applyUserAccess();
+    updateGreeting();
 
-    // Paint the last known data for this user instantly, then refresh.
+    // Paint the last known data instantly, then refresh from the server.
     const cached = readLocalCache();
-    if (cached) applyDataSnapshot(cached);
+    if (cached) {
+        applyDataSnapshot(cached);
+        dataEverLoaded = true;
+        setSyncState("syncing");
+    }
 
     renderCurrentPage();
     loadCoreData();
+    startPolling();
 
 }
 
 function logoutUser(options = {}) {
 
     if (sessionToken && !options.silent) {
-        // Fire-and-forget: tell the server to end the session.
         apiRequest("logout", {}, { silent: true });
     }
+
+    stopPolling();
 
     currentUser = null;
     sessionToken = "";
@@ -364,14 +410,15 @@ function logoutUser(options = {}) {
     backlogTasks = [];
     allChecklists = {};
     allComments = {};
+    regularLatest = {};
     users = [];
     dataEverLoaded = false;
+    lastSignature = "";
     if (typeof resetAiState === "function") resetAiState();
 
-    sessionStorage.removeItem("usedbookrCurrentUser");
-    sessionStorage.removeItem("usedbookrSessionToken");
-    sessionStorage.removeItem("usedbookrOperationsLogin");
-    sessionStorage.removeItem("usedbookrShowEveryone");
+    store.remove("usedbookrCurrentUser");
+    store.remove("usedbookrSessionToken");
+    store.remove("usedbookrShowEveryone");
     showEveryone = false;
     Object.keys(expandedSections).forEach(function (k) { delete expandedSections[k]; });
     clearLocalCaches();
@@ -464,8 +511,15 @@ function updateLoggedInUserProfile() {
 
 }
 
-/* Non-admins: scope text, hide the admin-only department filter
-   on Regular Tasks. */
+function updateGreeting() {
+    if (!currentUser) return;
+    const hour = new Date().getHours();
+    const part = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+    const name = firstName(currentUser.name || currentUser.username);
+    setText("dashboardGreeting", name ? `${part}, ${name}` : part);
+    setText("dashboardDateLine", new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" }));
+}
+
 function applyUserAccess() {
 
     if (!currentUser) return;
@@ -479,12 +533,12 @@ function applyUserAccess() {
     const othersText = privileged ? "everyone's tasks" : (primary ? `the rest of ${primary}` : "other people's tasks");
 
     if (!showEveryone) {
-        setText("tasksScopeText", `Tasks you own, across every department. Use "Show others' tasks" to see ${othersText}.`);
-        setText("dashboardScopeText", "Numbers for tasks you own.");
+        setText("tasksScopeText", `Tasks you own, across every department. Turn on "Show others' tasks" to see ${othersText}.`);
+        setText("dashboardScopeText", "These numbers cover tasks you own.");
         setText("totalTasksScope", "Owned by you");
     } else {
         setText("tasksScopeText", `Your tasks first, then ${othersText}.`);
-        setText("dashboardScopeText", `Numbers for your tasks and ${othersText}.`);
+        setText("dashboardScopeText", `These numbers cover your tasks and ${othersText}.`);
         setText("totalTasksScope", privileged ? "All departments" : (primary ? `Yours + ${primary}` : "Yours + others"));
     }
 
@@ -509,7 +563,6 @@ function currentUserLabel() {
     return (currentUser && (currentUser.name || currentUser.username)) || "Website";
 }
 
-/* Splits "Tarun, Royston" / "Tarun/Bhuvana" into separate names. */
 function splitOwners(value) {
     return String(value || "")
         .split(/[,;\/&\n]+/)
@@ -521,7 +574,6 @@ function joinOwners(list) {
     return list.join(", ");
 }
 
-/* Makes "Mr.Tarun", "tarun" and "Tarun " compare equal. */
 function normalizePersonName(value) {
     return String(value || "")
         .toLowerCase()
@@ -531,8 +583,6 @@ function normalizePersonName(value) {
         .trim();
 }
 
-/* A stored owner name matches a user when it equals their name,
-   their username, or just their first name ("Sundara" → "Sundara Gandhi"). */
 function ownerMatchesUser(ownerToken, user) {
     const owner = normalizePersonName(ownerToken);
     if (!owner || !user) return false;
@@ -542,8 +592,8 @@ function ownerMatchesUser(ownerToken, user) {
 
     if (owner === name || owner === username) return true;
 
-    const firstName = name.split(" ")[0];
-    return !!firstName && owner === firstName;
+    const first = name.split(" ")[0];
+    return !!first && owner === first;
 }
 
 function currentUserMatches(assignedTo) {
@@ -560,8 +610,6 @@ function ownersDisplay(assignedTo) {
     }).join("");
 }
 
-/* Same rule as the server: admins see everything; others see their
-   own items (any department) plus their primary department. */
 function canSeeItem(item) {
     if (!currentUser) return false;
     if (isPrivilegedUser()) return true;
@@ -625,6 +673,16 @@ function initializeNavigation() {
 
 }
 
+function initializeMobileTabbar() {
+    document.querySelectorAll(".tab-item").forEach(function (item) {
+        item.addEventListener("click", function () {
+            if (item.dataset.action === "menu") { toggleSidebar(); return; }
+            if (item.dataset.page) showPage(item.dataset.page);
+            window.scrollTo({ top: 0 });
+        });
+    });
+}
+
 function initializeSidebarToggle() {
     const backdrop = document.getElementById("sidebarBackdrop");
     if (backdrop) backdrop.addEventListener("click", closeSidebarOnMobile);
@@ -656,6 +714,9 @@ function showPage(page) {
     document.querySelectorAll(".nav-item").forEach(function (item) {
         item.classList.toggle("active", item.dataset.page === page);
     });
+    document.querySelectorAll(".tab-item").forEach(function (item) {
+        item.classList.toggle("active", item.dataset.page === page);
+    });
 
     updatePageHeader(page);
     renderCurrentPage();
@@ -682,7 +743,6 @@ function updatePageHeader(page) {
 
 }
 
-/* Only re-render what's on screen — switching pages renders the new one. */
 function renderCurrentPage() {
 
     switch (currentPage) {
@@ -698,6 +758,23 @@ function renderCurrentPage() {
         case "ai": if (typeof renderAiPage === "function") renderAiPage(); break;
     }
 
+}
+
+/* KPI cards on the dashboard jump to the matching filtered list. */
+function initializeKpiShortcuts() {
+    document.querySelectorAll(".kpi-card[data-status-filter]").forEach(function (card) {
+        const go = function () {
+            setInput("taskSearch", "");
+            setInput("departmentFilter", "");
+            setInput("priorityFilter", "");
+            setInput("statusFilter", card.dataset.statusFilter);
+            showPage("tasks");
+        };
+        card.addEventListener("click", go);
+        card.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); go(); }
+        });
+    });
 }
 
 /* =========================================================
@@ -719,7 +796,6 @@ function showGlobalStatusBanner(message, options = {}) {
     const retryButton = document.getElementById("globalStatusBannerRetry");
     if (!banner) return;
 
-    // Never let a "still loading" notice cover up a real error.
     if (options.kind === "slow" && banner.classList.contains("show") && banner.dataset.kind === "error") return;
 
     setText("globalStatusBannerText", message);
@@ -754,12 +830,39 @@ function slowRequestEnded() {
 }
 
 /* =========================================================
+   SYNC STATUS (top bar): "Up to date · 4:12 PM" + ↻ button
+========================================================= */
+
+function setSyncState(state) {
+
+    const button = document.getElementById("syncButton");
+    const label = document.getElementById("syncStatus");
+    if (!button || !label) return;
+
+    button.classList.toggle("is-syncing", state === "syncing");
+    button.classList.toggle("is-error", state === "error");
+
+    if (state === "syncing") {
+        label.textContent = "Updating…";
+    } else if (state === "error") {
+        label.textContent = navigator.onLine === false ? "Offline" : "Not updated";
+    } else if (lastLoadedAt) {
+        label.textContent = "Updated " + new Date(lastLoadedAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+    }
+
+    button.title = "Refresh from the sheet" + (lastLoadedAt ? " (last update " + new Date(lastLoadedAt).toLocaleTimeString("en-IN") + ")" : "");
+
+}
+
+function initializeSyncButton() {
+    document.getElementById("syncButton")?.addEventListener("click", function () {
+        if (!currentUser) return;
+        loadCoreData({ fresh: true, announce: true });
+    });
+}
+
+/* =========================================================
    API REQUEST
-   - Sends the session token with every call.
-   - Times out instead of hanging forever.
-   - Retries only safe (repeatable) actions after a dropped
-     connection. Anything that ADDS a row is never retried,
-     otherwise it could be saved twice.
 ========================================================= */
 
 const NON_IDEMPOTENT_ACTIONS = new Set([
@@ -770,9 +873,13 @@ const NON_IDEMPOTENT_ACTIONS = new Set([
 ]);
 
 const REQUEST_TIMEOUT_MS = 30000;
-const SLOW_REQUEST_NOTICE_MS = 4000;
+const SLOW_REQUEST_NOTICE_MS = 5000;
 
 async function apiRequest(action, data = {}, options = {}) {
+
+    if (navigator.onLine === false) {
+        return { success: false, message: "You're offline. Check your internet connection and try again.", networkError: true };
+    }
 
     const allowRetry = !NON_IDEMPOTENT_ACTIONS.has(action);
     const maxAttempts = allowRetry ? 2 : 1;
@@ -801,7 +908,8 @@ async function apiRequest(action, data = {}, options = {}) {
                 headers: { "Content-Type": "text/plain;charset=utf-8" },
                 body: JSON.stringify(Object.assign({ action: action, token: sessionToken }, data)),
                 signal: controller.signal,
-                redirect: "follow"
+                redirect: "follow",
+                cache: "no-store"
             });
 
             cleanup();
@@ -831,7 +939,7 @@ async function apiRequest(action, data = {}, options = {}) {
             console.error("API Error:", action, error);
 
             const message = error.name === "AbortError"
-                ? "The server took too long to answer. Your change may still have saved — refresh before trying again."
+                ? "The server took too long to answer. Your change may still have saved — press ↻ before trying again."
                 : "Couldn't reach Google Sheets. Check your internet connection and try again.";
 
             return { success: false, message: message, networkError: isNetworkLevel };
@@ -845,7 +953,7 @@ async function apiRequest(action, data = {}, options = {}) {
 }
 
 /* =========================================================
-   SAVING LOADER (small "Saving…" pill)
+   SAVING LOADER
 ========================================================= */
 
 const activeRequests = new Set();
@@ -921,7 +1029,6 @@ function groupByTaskId(list) {
     return map;
 }
 
-/* Accepts either the server's bootstrap response or the local cache. */
 function applyDataSnapshot(snapshot) {
 
     if (!snapshot) return;
@@ -930,6 +1037,7 @@ function applyDataSnapshot(snapshot) {
     if (Array.isArray(snapshot.regularTasks)) regularTasks = snapshot.regularTasks.filter(canSeeItem);
     if (Array.isArray(snapshot.backlog)) backlogTasks = snapshot.backlog;
     if (Array.isArray(snapshot.users)) setUsers(snapshot.users);
+    if (snapshot.regularLatest && typeof snapshot.regularLatest === "object") regularLatest = snapshot.regularLatest;
 
     if (Array.isArray(snapshot.checklists)) allChecklists = groupByTaskId(snapshot.checklists);
     else if (snapshot.checklists && typeof snapshot.checklists === "object") allChecklists = snapshot.checklists;
@@ -941,56 +1049,83 @@ function applyDataSnapshot(snapshot) {
 
     if (typeof snapshot.aiAccess === "boolean" && currentUser) {
         currentUser.aiAccess = snapshot.aiAccess;
-        sessionStorage.setItem("usedbookrCurrentUser", JSON.stringify(currentUser));
+        store.set("usedbookrCurrentUser", JSON.stringify(currentUser));
     }
     if (typeof applyAiAccess === "function") applyAiAccess();
 
 }
 
-async function loadCoreData() {
+function snapshotSignature(result) {
+    try {
+        return JSON.stringify([result.tasks, result.regularTasks, result.backlog, result.checklists,
+            result.comments, result.regularLatest, result.users, result.aiAccess]);
+    } catch (e) {
+        return String(Date.now());
+    }
+}
 
-    // Don't start a second load while one is already running.
+/* options.silent  = background check (no banners, no re-render if nothing changed)
+   options.fresh   = skip the server cache and read the sheet live (↻ button)
+   options.announce = show a small "Up to date" toast when done */
+async function loadCoreData(options = {}) {
+
     if (coreLoadPromise) return coreLoadPromise;
 
     coreLoadPromise = (async function () {
 
-        const result = await apiRequest("bootstrap");
+        setSyncState("syncing");
 
-        if (!currentUser) return; // logged out meanwhile
+        const result = await apiRequest("bootstrap", options.fresh ? { fresh: true } : {}, { silent: !!options.silent });
+
+        if (!currentUser) return;
 
         if (result && result.success) {
 
-            applyDataSnapshot(result);
+            const signature = snapshotSignature(result);
+            const changed = signature !== lastSignature;
+            lastSignature = signature;
 
             dataEverLoaded = true;
             dataLoadFailed = false;
             lastLoadedAt = Date.now();
-            persistLocalCache();
-            if (typeof loadMyInsight === "function") loadMyInsight();
+
+            if (changed) {
+                applyDataSnapshot(result);
+                persistLocalCache();
+                renderCurrentPage();
+                refreshOpenDrawers();
+            }
+
+            if (!options.silent && typeof loadMyInsight === "function") loadMyInsight();
 
             const sectionErrors = Object.keys(result.errors || {});
             if (sectionErrors.length) {
                 showGlobalStatusBanner("Some sections couldn't load (" + sectionErrors.join(", ") + "). The rest is up to date.",
-                    { isError: true, onRetry: loadCoreData });
+                    { isError: true, onRetry: function () { loadCoreData({ fresh: true }); } });
             } else {
                 const banner = document.getElementById("globalStatusBanner");
                 if (banner && banner.dataset.kind === "error") hideGlobalStatusBanner();
             }
 
+            setSyncState("ok");
+            if (options.announce) showNotification("Up to date", changed ? "Loaded the latest changes." : "Nothing new since your last refresh.");
+
         } else if (!result?.authError) {
 
             dataLoadFailed = true;
-            showGlobalStatusBanner(
-                (dataEverLoaded || tasks.length
-                    ? "Couldn't refresh — showing the last saved data. "
-                    : "Couldn't load your data. ") + (result?.message || ""),
-                { isError: true, onRetry: loadCoreData }
-            );
+            setSyncState("error");
+
+            if (!options.silent) {
+                showGlobalStatusBanner(
+                    (dataEverLoaded || tasks.length
+                        ? "Couldn't refresh — showing the last saved data. "
+                        : "Couldn't load your data. ") + (result?.message || ""),
+                    { isError: true, onRetry: function () { loadCoreData(); } }
+                );
+                renderCurrentPage();
+            }
 
         }
-
-        renderCurrentPage();
-        refreshOpenDrawers();
 
     })();
 
@@ -1002,17 +1137,49 @@ async function loadCoreData() {
 
 }
 
-/* Quietly refresh when someone comes back to the tab after a while. */
+/* Don't refresh underneath someone who is typing or has something open. */
+function isUserBusy() {
+    if (activeRequests.size > 0) return true;
+    if (document.body.classList.contains("modal-open")) return true;
+    if (document.querySelector(".owner-picker.is-open")) return true;
+    const active = document.activeElement;
+    if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) && active.id !== "taskSearch" && active.value) return true;
+    const pendingChecklist = Object.keys(allChecklists).some(function (k) { return allChecklists[k].some(function (i) { return i.pending; }); });
+    const pendingComment = Object.keys(allComments).some(function (k) { return allComments[k].some(function (c) { return c.pending; }); });
+    return pendingChecklist || pendingComment;
+}
+
+function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(function () {
+        if (!currentUser || !sessionToken) return;
+        if (document.visibilityState !== "visible") return;
+        if (isUserBusy()) return;
+        loadCoreData({ silent: true });
+    }, POLL_INTERVAL_MS);
+}
+
+function stopPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+}
+
 function initializeBackgroundRefresh() {
 
-    document.addEventListener("visibilitychange", function () {
+    const refreshIfStale = function () {
         if (document.visibilityState !== "visible" || !currentUser || !sessionToken) return;
-        if (Date.now() - lastLoadedAt > 2 * 60 * 1000) loadCoreData();
+        if (Date.now() - lastLoadedAt > REFOCUS_REFRESH_MS && !isUserBusy()) loadCoreData({ silent: true });
+    };
+
+    document.addEventListener("visibilitychange", refreshIfStale);
+    window.addEventListener("focus", refreshIfStale);
+    window.addEventListener("online", function () {
+        if (currentUser) loadCoreData({ silent: true });
     });
+    window.addEventListener("offline", function () { setSyncState("error"); });
 
 }
 
-/* Put one task returned by the server into local state. */
 function upsertLocalTask(rawTask) {
 
     if (!rawTask) return;
@@ -1030,19 +1197,18 @@ function upsertLocalTask(rawTask) {
         tasks.unshift(normalized);
     }
 
+    lastSignature = ""; // next background check re-applies server data
     persistLocalCacheSoon();
     renderCurrentPage();
 
 }
 
 /* =========================================================
-   OWNER PICKER (multi-select dropdown fed by the Users sheet)
+   OWNER PICKER
 ========================================================= */
 
 function setUsers(list) {
 
-    // Deduplicate by display name so the dropdown doesn't list the
-    // same name twice.
     const seen = {};
     users = (list || [])
         .filter(function (u) { return u && (u.name || u.username); })
@@ -1060,8 +1226,6 @@ function setUsers(list) {
 
 }
 
-/* Maps a stored name like "Tarun" to the Users-sheet name "Mr.Tarun".
-   Returns null if no unique match is found. */
 function canonicalUserName(token) {
     const matches = users.filter(function (u) { return ownerMatchesUser(token, u); });
     return matches.length === 1 ? matches[0].name : null;
@@ -1092,7 +1256,7 @@ function createOwnerPicker(root) {
     const search = root.querySelector(".owner-picker-search");
     const optionsBox = root.querySelector(".owner-picker-options");
 
-    let selected = [];      // display names, in pick order
+    let selected = [];
     let disabled = false;
 
     function renderChips() {
@@ -1111,7 +1275,6 @@ function createOwnerPicker(root) {
         const query = normalizePersonName(search.value);
         const names = users.map(function (u) { return u.name; });
 
-        // Keep old names that aren't in the Users sheet visible so they can be removed.
         selected.forEach(function (name) { if (names.indexOf(name) === -1) names.push(name); });
 
         const visible = names.filter(function (name) { return !query || normalizePersonName(name).indexOf(query) !== -1; });
@@ -1205,7 +1368,6 @@ function createOwnerPicker(root) {
         getValue: function () { return joinOwners(selected); },
         getList: function () { return selected.slice(); },
         setValue: function (value) {
-            // Map old spellings ("Tarun", "bhuvana") onto the Users-sheet names.
             const out = [];
             splitOwners(value).forEach(function (token) {
                 const name = canonicalUserName(token) || token;
@@ -1240,7 +1402,7 @@ function initializeOwnerPickers() {
 }
 
 /* =========================================================
-   SECTIONS: MY TASKS → OTHERS IN MY DEPARTMENT (collapsible)
+   SECTIONS: MY TASKS → OTHERS (collapsible)
 ========================================================= */
 
 const PRIORITY_SORT_ORDER = { high: 0, medium: 1, low: 2 };
@@ -1269,7 +1431,6 @@ function makeDateThenPriorityComparator(dateField) {
 
 }
 
-/* Completed items sink to the bottom of each section. */
 function makeSectionComparator(dateField) {
     const byDate = makeDateThenPriorityComparator(dateField);
     return function (a, b) {
@@ -1280,10 +1441,6 @@ function makeSectionComparator(dateField) {
     };
 }
 
-/* Returns [{ key, title, items, collapsible, emptyText }].
-   Everyone: "My Tasks" (always open) + other people's tasks, hidden
-   until the section button or the top-bar switch is clicked.
-   Admins' "others" = everyone else; others' = rest of their department. */
 function buildSections(items, options = {}) {
 
     const comparator = makeSectionComparator(options.dateField || "dueDate");
@@ -1336,7 +1493,6 @@ function toggleSection(pageKey, sectionKey) {
     renderCurrentPage();
 }
 
-/* Tasks used for dashboard numbers, follow-ups, activity etc. */
 function scopedTasks() {
     return showEveryone ? tasks : tasks.filter(function (t) { return currentUserMatches(t.assignedTo); });
 }
@@ -1344,7 +1500,7 @@ function scopedTasks() {
 function setShowEveryone(value) {
     showEveryone = !!value;
     Object.keys(expandedSections).forEach(function (k) { delete expandedSections[k]; });
-    try { sessionStorage.setItem("usedbookrShowEveryone", showEveryone ? "1" : "0"); } catch (e) { /* ignore */ }
+    store.set("usedbookrShowEveryone", showEveryone ? "1" : "0");
     updateScopeToggle();
     applyUserAccess();
     renderCurrentPage();
@@ -1391,10 +1547,13 @@ function updateDashboard() {
     animateNumber("completedTasks", countStatus(list, "Completed"));
     animateNumber("overdueTasks", list.filter(isOverdue).length);
 
+    document.querySelector(".kpi-overdue")?.classList.toggle("has-value", list.some(isOverdue));
+
     animateNumber("highPriorityCount", list.filter(function (t) { return t.priority === "High"; }).length);
     animateNumber("mediumPriorityCount", list.filter(function (t) { return t.priority === "Medium"; }).length);
     animateNumber("lowPriorityCount", list.filter(function (t) { return t.priority === "Low"; }).length);
 
+    updateGreeting();
     updateFollowupSummary();
     renderRecentTasks();
 
@@ -1408,12 +1567,12 @@ function animateNumber(id, value) {
     const target = Number(value) || 0;
     const start = Number(element.textContent) || 0;
 
-    if (start === target || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (start === target || document.hidden || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         element.textContent = target;
         return;
     }
 
-    const duration = 450;
+    const duration = 400;
     const startTime = performance.now();
 
     function tick(now) {
@@ -1446,11 +1605,11 @@ function renderRecentTasks() {
 
     batchRows(tbody, recent, function (task) {
         const row = document.createElement("tr");
-        row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "");
+        row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "") + (isOverdue(task) ? " row-overdue" : "");
         row.dataset.id = task.taskId;
         row.innerHTML = `
-            <td>${escapeHtml(task.taskId)}</td>
-            <td>${escapeHtml(task.task)}</td>
+            <td class="cell-id">${escapeHtml(task.taskId)}</td>
+            <td class="cell-title">${escapeHtml(task.task)}</td>
             <td>${escapeHtml(task.department)}</td>
             <td class="owners-cell">${ownersDisplay(task.assignedTo)}</td>
             <td>${priorityBadge(task.priority)}</td>
@@ -1459,6 +1618,8 @@ function renderRecentTasks() {
         `;
         return row;
     });
+
+    labelCells(tbody);
 
 }
 
@@ -1469,7 +1630,7 @@ function renderRecentTasks() {
 function buildTaskRow(task, options = {}) {
 
     const row = document.createElement("tr");
-    row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "") + (options.extraClass ? " " + options.extraClass : "");
+    row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "") + (isOverdue(task) ? " row-overdue" : "") + (options.extraClass ? " " + options.extraClass : "");
     row.dataset.id = task.taskId;
 
     const actionCell = isPrivilegedUser()
@@ -1478,29 +1639,29 @@ function buildTaskRow(task, options = {}) {
 
     if (options.variant === "department") {
         row.innerHTML = `
-            <td>${escapeHtml(task.taskId)}</td>
-            <td>${escapeHtml(task.task)}</td>
+            <td class="cell-id">${escapeHtml(task.taskId)}</td>
+            <td class="cell-title">${escapeHtml(task.task)}</td>
             <td class="owners-cell">${ownersDisplay(task.assignedTo)}</td>
             <td>${priorityBadge(task.priority)}</td>
             <td>${statusBadge(task.status, task)}</td>
             <td>${dueDateWithChip(task)}</td>
             <td>${displayDate(task.followupDate)}</td>
             <td class="checklist-cell">${checklistStatusDot(task.taskId)}</td>
-            <td>${actionCell}</td>
+            <td class="cell-action">${actionCell}</td>
         `;
         return row;
     }
 
     row.innerHTML = `
-        <td>${escapeHtml(task.taskId)}</td>
-        <td><strong>${escapeHtml(task.task)}</strong></td>
+        <td class="cell-id">${escapeHtml(task.taskId)}</td>
+        <td class="cell-title"><strong>${escapeHtml(task.task)}</strong></td>
         <td>${escapeHtml(task.department)}</td>
         <td class="owners-cell">${ownersDisplay(task.assignedTo)}</td>
         <td>${priorityBadge(task.priority)}</td>
         <td>${statusBadge(task.status, task)}</td>
         <td>${dueDateWithChip(task)}</td>
         <td class="checklist-cell">${checklistStatusDot(task.taskId)}</td>
-        <td>${actionCell}</td>
+        <td class="cell-action">${actionCell}</td>
     `;
 
     return row;
@@ -1547,6 +1708,7 @@ function renderSectionedTable(tbody, items, pageKey, colspan, rowOptions, forceE
     });
 
     tbody.appendChild(fragment);
+    labelCells(tbody);
 
 }
 
@@ -1583,8 +1745,6 @@ function renderTasksTable() {
         return;
     }
 
-    // Always My Tasks first, others hidden until asked for. A text search
-    // opens the others section automatically so matches aren't hidden.
     renderSectionedTable(tbody, filtered, "tasks", 9, {}, !!search);
 
 }
@@ -1596,7 +1756,7 @@ function initializeTableDelegation() {
     if (tableDelegationReady) return;
     tableDelegationReady = true;
 
-    ["allTasksTable", "departmentTasksTable", "recentTasksTable"].forEach(function (id) {
+    ["allTasksTable", "departmentTasksTable", "recentTasksTable", "followupsTable"].forEach(function (id) {
 
         const tbody = document.getElementById(id);
         if (!tbody) return;
@@ -1669,9 +1829,11 @@ function renderFollowups() {
 
     batchRows(tbody, followups, function (task) {
         const row = document.createElement("tr");
+        row.className = "row-clickable" + (dateBeforeToday(task.followupDate) && task.status !== "Completed" ? " row-overdue" : "");
+        row.dataset.id = task.taskId;
         row.innerHTML = `
-            <td>${escapeHtml(task.taskId)}</td>
-            <td>${escapeHtml(task.task)}</td>
+            <td class="cell-id">${escapeHtml(task.taskId)}</td>
+            <td class="cell-title">${escapeHtml(task.task)}</td>
             <td>${escapeHtml(task.department)}</td>
             <td class="owners-cell">${ownersDisplay(task.assignedTo)}</td>
             <td>${displayDate(task.followupDate)}</td>
@@ -1680,6 +1842,8 @@ function renderFollowups() {
         `;
         return row;
     });
+
+    labelCells(tbody);
 
 }
 
@@ -1693,6 +1857,7 @@ function openDepartment(department) {
     document.querySelectorAll(".nav-item").forEach(function (item) {
         item.classList.toggle("active", item.dataset.department === department);
     });
+    document.querySelectorAll(".tab-item").forEach(function (item) { item.classList.remove("active"); });
     showDepartmentPage(department);
 }
 
@@ -1786,16 +1951,24 @@ function renderActivity() {
 
     container.innerHTML = activities.map(function (task) {
         return `
-            <div class="activity-item">
+            <div class="activity-item row-clickable" data-id="${escapeHtml(task.taskId)}">
                 <div class="activity-dot"></div>
                 <div class="activity-content">
                     <strong>${escapeHtml(task.task)}</strong>
-                    <p>${escapeHtml(task.status)} · ${escapeHtml(task.department)}</p>
-                    <small>Updated by ${escapeHtml(task.updatedBy || "System")} · ${escapeHtml(displayDate(task.updatedDate))}</small>
+                    <p>${statusBadge(task.status, task)} <span>${escapeHtml(task.department)}</span></p>
+                    <small>Updated by ${escapeHtml(task.updatedBy || "System")}, ${escapeHtml(displayDate(task.updatedDate))}</small>
                 </div>
             </div>
         `;
     }).join("");
+
+    if (!container.dataset.wired) {
+        container.dataset.wired = "1";
+        container.addEventListener("click", function (event) {
+            const item = event.target.closest(".activity-item");
+            if (item && item.dataset.id) openTaskDetailDrawer(item.dataset.id);
+        });
+    }
 
 }
 
@@ -1874,7 +2047,7 @@ function openTaskModal(task = null) {
         clearTaskForm();
         if (currentPage === "department" && currentDepartment) setInput("taskDepartment", currentDepartment);
         else if (currentPage === "bookFair") setInput("taskDepartment", "Book Fair - Events");
-        // Default a new task to its creator.
+        else if (primaryDepartment()) setInput("taskDepartment", primaryDepartment());
         if (taskOwnerPicker && currentUser) taskOwnerPicker.setValue(currentUser.name || currentUser.username);
     }
 
@@ -1966,7 +2139,7 @@ async function saveTaskRequest() {
     }
 
     closeTaskModal();
-    showNotification("Saved", editId ? "Task updated." : "Task created.");
+    showNotification("Saved", editId ? "Task updated." : `Task ${result.task?.taskId || ""} created.`);
     upsertLocalTask(result.task);
 
 }
@@ -2026,9 +2199,6 @@ function exportTasksCSV() {
 
 /* =========================================================
    DATES
-   Handles yyyy-MM-dd, MM-dd-yyyy, M/d/yyyy and MM-dd-yy (the
-   formats found in the sheet). Safari can't parse "09-30-2026"
-   on its own, which made due dates disappear there.
 ========================================================= */
 
 function parseDate(value) {
@@ -2068,6 +2238,18 @@ function displayDate(value) {
     const date = parseDate(value);
     if (!date) return escapeHtml(value);
     return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+/* "Today", "Yesterday", "3 days ago", or the date. */
+function relativeDay(value) {
+    const date = parseDate(value);
+    if (!date) return "";
+    date.setHours(0, 0, 0, 0);
+    const diff = Math.round((startOfToday().getTime() - date.getTime()) / 86400000);
+    if (diff === 0) return "today";
+    if (diff === 1) return "yesterday";
+    if (diff > 1 && diff < 7) return diff + " days ago";
+    return displayDate(value);
 }
 
 function todayInput() { return formatDateForInput(new Date()); }
@@ -2141,20 +2323,22 @@ function showNotification(title, message) {
     setText("notificationTitle", title);
     setText("notificationMessage", message);
 
+    const isProblem = /not |error|couldn|can't/i.test(title);
+    notification.classList.toggle("is-problem", isProblem);
+    const icon = notification.querySelector(".notification-icon");
+    if (icon) icon.textContent = isProblem ? "!" : "✓";
+
     notification.classList.remove("show");
-    void notification.offsetWidth; // restart animation
+    void notification.offsetWidth;
     notification.classList.add("show");
 
     clearTimeout(showNotification._timer);
-    showNotification._timer = setTimeout(function () { notification.classList.remove("show"); }, 3500);
+    showNotification._timer = setTimeout(function () { notification.classList.remove("show"); }, isProblem ? 5500 : 3000);
 
 }
 
 /* =========================================================
    REGULAR TASKS
-   Admins: department filter + everything grouped by frequency.
-   Everyone else: "My Regular Tasks" + collapsible
-   "Others in <my department>".
 ========================================================= */
 
 function initializeRegularTasksPage() {
@@ -2289,6 +2473,19 @@ function renderRegularTasks() {
 
 }
 
+function lastUpdateLine(regularTaskId) {
+    const latest = regularLatest[String(regularTaskId)];
+    if (!latest) return `<div class="regular-task-last regular-task-last-none">No update logged yet</div>`;
+    const done = String(latest.status).toLowerCase() === "completed";
+    const when = relativeDay(latest.date) || "";
+    return `
+        <div class="regular-task-last${done ? " is-done" : " is-pending"}" title="${escapeHtml(latest.description || "")}">
+            <span class="regular-task-last-dot"></span>
+            ${escapeHtml(latest.status || "Updated")} ${escapeHtml(when)}${latest.by ? " by " + escapeHtml(firstName(latest.by)) : ""}
+        </div>
+    `;
+}
+
 function createRegularTaskCard(task) {
 
     const id = String(task.regularTaskId || "").trim();
@@ -2301,18 +2498,18 @@ function createRegularTaskCard(task) {
                 <div class="regular-task-id">${escapeHtml(id)}</div>
                 <h3>${escapeHtml(task.task)}</h3>
                 <div class="regular-task-details">
-                    ${task.department ? `<span>Department: ${escapeHtml(task.department)}</span>` : ""}
-                    <span class="regular-task-owners">Owners: ${ownersDisplay(task.assignedTo)}</span>
-                    ${task.priority ? `<span>Priority: ${escapeHtml(task.priority)}</span>` : ""}
-                    ${task.expectedTime ? `<span>Expected: ${escapeHtml(task.expectedTime)}</span>` : ""}
-                    ${expectedDate ? `<span>Expected Date: ${displayDate(expectedDate)}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</span>` : ""}
+                    ${task.department ? `<span>${escapeHtml(task.department)}</span>` : ""}
+                    <span class="regular-task-owners">${ownersDisplay(task.assignedTo)}</span>
+                    ${task.expectedTime ? `<span>Expected: ${escapeHtml(task.expectedTime)}${task.priority ? ", " + escapeHtml(task.priority) + " priority" : ""}</span>` : ""}
+                    ${expectedDate ? `<span>Expected date: ${displayDate(expectedDate)}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</span>` : ""}
                 </div>
+                ${lastUpdateLine(id)}
             </div>
             <div class="regular-task-card-actions">
                 <button type="button" class="regular-task-checklist-button" data-regular-task-id="${escapeHtml(id)}">
                     ${checklistStatusDot(id)} Checklist
                 </button>
-                <button type="button" class="regular-task-update-button" data-regular-task-id="${escapeHtml(id)}">Update</button>
+                <button type="button" class="regular-task-update-button" data-regular-task-id="${escapeHtml(id)}">Log update</button>
             </div>
         </div>
     `;
@@ -2341,7 +2538,7 @@ function openRegularTaskUpdate(regularTaskId) {
     const form = document.getElementById("regularTaskUpdateForm");
     if (form) form.dataset.regularTaskId = task.regularTaskId || "";
 
-    setInput("regularTaskStatus", "");
+    setInput("regularTaskStatus", "Completed");
     setInput("regularTaskDescription", "");
 
     const error = document.getElementById("regularTaskUpdateError");
@@ -2349,6 +2546,7 @@ function openRegularTaskUpdate(regularTaskId) {
 
     modal.style.display = "flex";
     document.body.classList.add("modal-open");
+    setTimeout(function () { document.getElementById("regularTaskDescription")?.focus(); }, 50);
 
 }
 
@@ -2397,8 +2595,15 @@ function initializeRegularTaskUpdateForm() {
 
             if (!result || !result.success) return fail(result?.message || "Couldn't save the update. Try again.");
 
+            regularLatest[regularTaskId] = result.latest || {
+                by: currentUserLabel(), date: todayInput(), status: status, description: description
+            };
+            lastSignature = "";
+            persistLocalCacheSoon();
+
             closeRegularTaskUpdate();
             showNotification("Updated", "Regular task update saved.");
+            if (currentPage === "regularTasks") renderRegularTasks();
 
         }
         finally {
@@ -2452,11 +2657,7 @@ function closeRegularTaskChecklistDrawer() {
 }
 
 /* =========================================================
-   CHECKLISTS
-   Ticks / adds / deletes show instantly and save in the
-   background; if the save fails the change is undone and a
-   message is shown. The server sends back the task's full,
-   fresh checklist with every reply, so no second request.
+   CHECKLISTS (instant, saved in background)
 ========================================================= */
 
 function getChecklist(taskId) {
@@ -2467,13 +2668,13 @@ function checklistStatusDot(taskId) {
 
     const items = getChecklist(taskId);
 
-    if (!items.length) return `<span class="checklist-dot checklist-dot-red" title="No checklist yet"></span>`;
+    if (!items.length) return `<span class="checklist-dot checklist-dot-empty" title="No checklist yet"></span>`;
 
     const done = items.filter(function (i) { return String(i.status).toLowerCase() === "completed"; }).length;
 
     if (done === items.length) return `<span class="checklist-dot checklist-dot-green" title="Checklist complete"></span>`;
 
-    return `<span class="checklist-dot checklist-dot-red" title="${done}/${items.length} done"></span>`;
+    return `<span class="checklist-dot checklist-dot-red" title="${done}/${items.length} done"></span><span class="checklist-count">${done}/${items.length}</span>`;
 
 }
 
@@ -2484,7 +2685,6 @@ function updateChecklistProgressLabel(taskId, element) {
     element.textContent = done + "/" + items.length;
 }
 
-/* Re-renders every place a checklist might currently be showing. */
 function onChecklistChanged() {
     persistLocalCacheSoon();
     if (taskDetailCurrentId) renderTaskDetailChecklist();
@@ -2509,6 +2709,7 @@ async function addChecklistItem(taskId, text) {
 
     if (result && result.success && Array.isArray(result.checklists)) {
         allChecklists[key] = result.checklists;
+        lastSignature = "";
     } else {
         allChecklists[key] = getChecklist(key).filter(function (i) { return i.checklistId !== temp.checklistId; });
         showNotification("Not saved", result?.message || "Couldn't add the checklist item.");
@@ -2535,6 +2736,7 @@ async function toggleChecklistItem(taskId, itemId) {
 
     if (result && result.success && Array.isArray(result.checklists)) {
         allChecklists[key] = result.checklists;
+        lastSignature = "";
     } else {
         item.status = previous;
         item.pending = false;
@@ -2563,6 +2765,7 @@ async function removeChecklistItem(taskId, itemId) {
 
     if (result && result.success && Array.isArray(result.checklists)) {
         allChecklists[key] = result.checklists;
+        lastSignature = "";
     } else {
         allChecklists[key] = before;
         showNotification("Not deleted", result?.message || "Couldn't delete the checklist item.");
@@ -2572,9 +2775,6 @@ async function removeChecklistItem(taskId, itemId) {
 
 }
 
-/* Draws a checklist and wires its events once. The element remembers
-   WHICH task it is showing (fixes a bug where adding an item in the
-   drawer could land on the first task you ever opened). */
 function renderChecklistInto(taskId, listElement, formElement, inputElement, options = {}) {
 
     if (!listElement) return;
@@ -2663,10 +2863,12 @@ async function addComment(taskId, text, rerender) {
 
     if (result && result.success && Array.isArray(result.comments)) {
         allComments[key] = result.comments;
+        lastSignature = "";
     } else {
         allComments[key] = getComments(key).filter(function (c) { return c.commentId !== temp.commentId; });
         showNotification("Not posted", result?.message || "Couldn't post the comment.");
-        return trimmed; // give the text back so it isn't lost
+        rerender();
+        return trimmed;
     }
 
     persistLocalCacheSoon();
@@ -2686,9 +2888,10 @@ function renderCommentsInto(taskId, threadElement) {
     }
 
     threadElement.innerHTML = comments.map(function (c) {
-        const when = c.pending ? "Sending…" : [displayDateSafe(c.date), c.time].filter(Boolean).join(" · ");
+        const when = c.pending ? "Sending…" : [displayDateSafe(c.date), c.time].filter(Boolean).join(", ");
+        const mine = normalizePersonName(c.user) === normalizePersonName(currentUserLabel());
         return `
-            <div class="comment-bubble${c.pending ? " is-pending" : ""}">
+            <div class="comment-bubble${c.pending ? " is-pending" : ""}${mine ? " is-mine" : ""}">
                 <div class="comment-bubble-head">
                     <span class="comment-bubble-author">${escapeHtml(c.user)}</span>
                     <span class="comment-bubble-date">${escapeHtml(when)}</span>
@@ -2747,7 +2950,6 @@ function initializeTaskDetailDrawer() {
         function () { return taskDetailCurrentId; },
         function () { renderCommentsInto(taskDetailCurrentId, document.getElementById("taskDetailComments")); });
 
-    // Status: anyone who can see the task. Updates instantly, reverts on failure.
     const statusSelect = document.getElementById("taskDetailStatus");
 
     statusSelect?.addEventListener("change", async function () {
@@ -2776,7 +2978,6 @@ function initializeTaskDetailDrawer() {
 
     });
 
-    // Owners / priority / dates: Founder & Operations Head only.
     const saveMetaButton = document.getElementById("taskDetailSaveMetaButton");
 
     saveMetaButton?.addEventListener("click", async function () {
@@ -2823,8 +3024,10 @@ function initializeTaskDetailDrawer() {
 
         const result = await apiRequest("updateTask", { task: { taskId: task.taskId, description: descriptionField.value } });
 
-        if (result && result.success) upsertLocalTask(result.task);
-        else {
+        if (result && result.success) {
+            upsertLocalTask(result.task);
+            showNotification("Saved", "Description updated.");
+        } else {
             task.description = previous;
             showNotification("Not saved", result?.message || "Couldn't save the description.");
         }
@@ -2860,6 +3063,13 @@ function fillTaskDetailDrawer(task) {
     setInput("taskDetailDueDate", task.dueDate);
     setInput("taskDetailFollowupDate", task.followupDate);
 
+    const meta = document.getElementById("taskDetailUpdatedLine");
+    if (meta) {
+        meta.textContent = task.updatedBy || task.updatedDate
+            ? "Last updated " + (relativeDay(task.updatedDate) || "") + (task.updatedBy ? " by " + task.updatedBy : "")
+            : "";
+    }
+
     if (taskDetailOwnerPicker) {
         taskDetailOwnerPicker.setValue(task.assignedTo);
         taskDetailOwnerPicker.setDisabled(!privileged);
@@ -2893,8 +3103,6 @@ function closeTaskDetailDrawer() {
 
 }
 
-/* After a background refresh, update any drawer that's open
-   (without touching fields the person may be editing). */
 function refreshOpenDrawers() {
 
     if (taskDetailCurrentId) {
@@ -3011,6 +3219,7 @@ async function saveBacklogItemFromForm() {
         const index = backlogTasks.findIndex(function (b) { return b.backlogId === result.item.backlogId; });
         if (index !== -1) backlogTasks[index] = result.item;
         else backlogTasks.push(result.item);
+        lastSignature = "";
         persistLocalCacheSoon();
     }
 
@@ -3059,7 +3268,7 @@ function renderBacklog() {
                 <p class="backlog-card-description">${escapeHtml(item.description || "No description yet.")}</p>
                 ${expectedDate ? `<div class="backlog-card-expected">Expected: ${displayDate(expectedDate)}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</div>` : ""}
                 <div class="backlog-card-footer">
-                    <span>${escapeHtml(item.department || "Unassigned")} · ${displayDate(item.createdDate)}</span>
+                    <span>${escapeHtml(item.department || "Unassigned")}, ${displayDate(item.createdDate)}</span>
                     <span class="backlog-card-comment-count">💬 ${commentCount}</span>
                 </div>
             </div>
@@ -3076,12 +3285,12 @@ function openBacklogDetailDrawer(id) {
 
     backlogDetailCurrentId = id;
 
-    setText("backlogDetailStatusLabel", String(item.status || "Backlog").toUpperCase());
+    setText("backlogDetailStatusLabel", String(item.status || "Backlog"));
     setText("backlogDetailTitle", item.task);
     setText("backlogDetailCreatedDate", displayDate(item.createdDate));
-    setText("backlogDetailDepartment", item.department ? "· " + item.department : "");
+    setText("backlogDetailDepartment", item.department ? ", " + item.department : "");
     setText("backlogDetailDescription", item.description || "No description yet.");
-    setText("backlogDetailExpected", item.expectedDate ? "· Expected " + displayDate(item.expectedDate) : "");
+    setText("backlogDetailExpected", item.expectedDate ? ", expected " + displayDate(item.expectedDate) : "");
 
     renderCommentsInto(id, document.getElementById("backlogDetailComments"));
 
