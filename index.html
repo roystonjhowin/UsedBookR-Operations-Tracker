@@ -3,18 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0d2b1c">
+    <meta name="description" content="Excelso — UsedBookR / Simply Sell Books operations tracker">
     <title>Excelso — Operations Management</title>
 
     <!-- Start the Apps Script connection early so the first request is faster -->
     <link rel="preconnect" href="https://script.google.com">
     <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 
+    <!-- Fonts: variable versions = 3 small downloads instead of 10 -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=Inter:wght@400..800&family=IBM+Plex+Mono:wght@600&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css?v=6.3">
-    <link rel="stylesheet" href="enhancements.css?v=6.3">
+    <!-- When you change a CSS/JS file, raise the ?v= number so every browser loads the new copy -->
+    <link rel="stylesheet" href="style.css?v=7.0">
+    <link rel="stylesheet" href="enhancements.css?v=7.0">
+    <link rel="stylesheet" href="polish.css?v=7.0">
     <link rel="preload" as="image" href="assets/logo-usedbookr.png">
 </head>
 <body>
@@ -28,12 +33,8 @@
             <div class="loader-page loader-page-3"></div>
             <div class="loader-spine"></div>
         </div>
-        <div class="loader-leaf loader-leaf-a"></div>
-        <div class="loader-leaf loader-leaf-b"></div>
-        <div class="loader-leaf loader-leaf-c"></div>
     </div>
     <div class="loader-word"><span>EXCEL</span><span class="loader-word-accent">SO</span></div>
-    <p class="loader-caption">Preparing your operations desk…</p>
 </div>
 
 <!-- LOGIN SCREEN -->
@@ -45,19 +46,19 @@
             <div class="login-brand">
                 <div class="logo-mark"><img src="assets/logo-usedbookr.png" alt="UsedBookR" decoding="async" fetchpriority="high"></div>
                 <h1>Excelso</h1>
-                <p>UsedBookR/Simply Sell Books Operations Tracker</p>
+                <p>UsedBookR / Simply Sell Books operations</p>
             </div>
 
             <div class="login-divider"></div>
 
-            <h2>Operations Login</h2>
-            <p class="login-description">Centralized system for tracking, monitoring and managing all departmental operations.</p>
+            <h2>Sign in</h2>
+            <p class="login-description">Every task, checklist and follow-up across the warehouse, listings, sales and events, in one place.</p>
 
             <form id="loginForm">
                 <div class="form-group">
                     <label for="loginUsername">Username</label>
                     <div class="input-shell">
-                        <input type="text" id="loginUsername" name="username" placeholder="Enter username" autocomplete="username" required>
+                        <input type="text" id="loginUsername" name="username" placeholder="Enter username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
                     </div>
                 </div>
 
@@ -72,7 +73,7 @@
                     </div>
                 </div>
 
-                <div id="loginError" class="login-error">Incorrect username or password. Please try again.</div>
+                <div id="loginError" class="login-error" role="alert">Incorrect username or password. Please try again.</div>
 
                 <button type="submit" class="login-button">
                     <span class="login-button-label">Sign In</span>
@@ -80,7 +81,7 @@
                 </button>
             </form>
 
-            <div class="login-footer">Authorized Operations Access · v6.1</div>
+            <div class="login-footer">Authorized operations access, v7.0</div>
         </div>
     </div>
 </div>
@@ -99,15 +100,15 @@
     <!-- SIDEBAR -->
     <aside class="sidebar">
         <div class="sidebar-header">
-            <div class="sidebar-logo"><img src="assets/logo-usedbookr.png" alt="UsedBookR" decoding="async" fetchpriority="high"></div>
+            <div class="sidebar-logo"><img src="assets/logo-usedbookr.png" alt="UsedBookR" decoding="async"></div>
             <div class="sidebar-brand">
                 <strong>Excelso</strong>
-                <span>UsedBookR/Simply Sell Books Operations Tracker</span>
+                <span>UsedBookR / Simply Sell Books</span>
             </div>
         </div>
 
         <nav class="sidebar-navigation">
-            <div class="navigation-title">MAIN</div>
+            <div class="navigation-title">Main</div>
 
             <button class="nav-item active" data-page="dashboard"><span class="nav-icon">▦</span><span>Dashboard</span></button>
             <button class="nav-item" data-page="tasks"><span class="nav-icon">✓</span><span>All Tasks</span></button>
@@ -116,11 +117,10 @@
             <button class="nav-item" data-page="backlog"><span class="nav-icon">▤</span><span>Backlog</span></button>
             <button class="nav-item" data-page="bookFair"><span class="nav-icon">◆</span><span>Book Fair</span></button>
 
-            <!-- Shown only to users with AI access (Founder, Operations Head, Teja) -->
             <div class="navigation-title nav-ai-only" style="display:none;">AI</div>
             <button class="nav-item nav-ai-only" data-page="ai" style="display:none;"><span class="nav-icon">✦</span><span>AI Assistant</span></button>
 
-            <div class="navigation-title">DEPARTMENTS</div>
+            <div class="navigation-title">Departments</div>
 
             <button class="nav-item department-item" data-department="B2B - Sales"><span class="department-code">B2B</span><span>B2B / Sales</span></button>
             <button class="nav-item department-item" data-department="Customer Support"><span class="department-code">CS</span><span>Customer Support</span></button>
@@ -149,7 +149,7 @@
                 </div>
             </div>
             <button id="logoutButton" class="logout-button"><span aria-hidden="true">&#10148;</span> Logout</button>
-            <div class="app-version">Version 6.1</div>
+            <div class="app-version">Version 7.0</div>
         </div>
     </aside>
 
@@ -165,11 +165,15 @@
             </div>
             <div class="topbar-right">
                 <span id="currentDate">--</span>
+                <button id="syncButton" class="sync-button" type="button" title="Refresh from the sheet">
+                    <span class="sync-icon" aria-hidden="true">↻</span>
+                    <span id="syncStatus" class="sync-status">Updating…</span>
+                </button>
                 <button id="scopeToggle" class="scope-toggle" type="button" aria-pressed="false" title="Switch between only your tasks and everyone's tasks">
                     <span class="scope-toggle-track" aria-hidden="true"><span class="scope-toggle-thumb"></span></span>
                     <span class="scope-toggle-label">Show others' tasks</span>
                 </button>
-                <button id="topAddTask" class="top-add-button" type="button"><span aria-hidden="true">+</span> Add Task</button>
+                <button id="topAddTask" class="top-add-button" type="button"><span aria-hidden="true">+</span><span class="top-add-label"> Add Task</span></button>
             </div>
         </header>
 
@@ -177,41 +181,41 @@
 
             <!-- DASHBOARD -->
             <section id="dashboardPage" class="page active-page">
-                <div class="page-header">
+                <div class="page-header dashboard-hero">
                     <div>
-                        <span class="page-label">OVERVIEW</span>
-                        <h2>Operations Dashboard</h2>
+                        <span id="dashboardDateLine" class="hero-date"></span>
+                        <h2 id="dashboardGreeting">Operations Dashboard</h2>
                         <p id="dashboardScopeText">Monitor tasks, priorities and follow-ups across all 14 departments.</p>
                     </div>
                     <button id="dashboardAddTask" class="primary-button" type="button">+ Add New Task</button>
                 </div>
 
-                <!-- Personal check-in about the logged-in user's own tasks (everyone sees their own) -->
                 <div id="myInsightCard" class="insight-card" style="display:none;" aria-live="polite"></div>
 
+                <!-- Each number is clickable: it opens All Tasks filtered to that status -->
                 <div class="kpi-grid">
-                    <div class="kpi-card kpi-total"><span>Total Tasks</span><strong id="totalTasks">0</strong><small id="totalTasksScope">All departments</small></div>
-                    <div class="kpi-card kpi-open"><span>Open</span><strong id="openTasks">0</strong><small>Not started</small></div>
-                    <div class="kpi-card kpi-progress"><span>In Progress</span><strong id="progressTasks">0</strong><small>Currently working</small></div>
-                    <div class="kpi-card kpi-onhold"><span>On Hold</span><strong id="onHoldTasks">0</strong><small>Paused for now</small></div>
-                    <div class="kpi-card kpi-overdue"><span>Overdue</span><strong id="overdueTasks">0</strong><small>Past due date</small></div>
-                    <div class="kpi-card kpi-completed"><span>Completed</span><strong id="completedTasks">0</strong><small>Closed tasks</small></div>
+                    <div class="kpi-card kpi-total" data-status-filter="" role="button" tabindex="0"><span>Total tasks</span><strong id="totalTasks">0</strong><small id="totalTasksScope">All departments</small></div>
+                    <div class="kpi-card kpi-open" data-status-filter="Open" role="button" tabindex="0"><span>Open</span><strong id="openTasks">0</strong><small>Not started</small></div>
+                    <div class="kpi-card kpi-progress" data-status-filter="In Progress" role="button" tabindex="0"><span>In progress</span><strong id="progressTasks">0</strong><small>Being worked on</small></div>
+                    <div class="kpi-card kpi-onhold" data-status-filter="On Hold" role="button" tabindex="0"><span>On hold</span><strong id="onHoldTasks">0</strong><small>Paused for now</small></div>
+                    <div class="kpi-card kpi-overdue" data-status-filter="Overdue" role="button" tabindex="0"><span>Overdue</span><strong id="overdueTasks">0</strong><small>Past due date</small></div>
+                    <div class="kpi-card kpi-completed" data-status-filter="Completed" role="button" tabindex="0"><span>Completed</span><strong id="completedTasks">0</strong><small>Closed</small></div>
                 </div>
 
                 <div class="dashboard-columns">
                     <div class="panel">
-                        <div class="panel-header"><div><h3>Priority Overview</h3><p>Tasks requiring attention</p></div></div>
+                        <div class="panel-header"><div><h3>Priority</h3><p>How the open work is weighted</p></div></div>
                         <div class="priority-list">
-                            <div><span><i class="priority-dot priority-dot-high"></i>High Priority</span><strong id="highPriorityCount">0</strong></div>
-                            <div><span><i class="priority-dot priority-dot-medium"></i>Medium Priority</span><strong id="mediumPriorityCount">0</strong></div>
-                            <div><span><i class="priority-dot priority-dot-low"></i>Low Priority</span><strong id="lowPriorityCount">0</strong></div>
+                            <div><span><i class="priority-dot priority-dot-high"></i>High priority</span><strong id="highPriorityCount">0</strong></div>
+                            <div><span><i class="priority-dot priority-dot-medium"></i>Medium priority</span><strong id="mediumPriorityCount">0</strong></div>
+                            <div><span><i class="priority-dot priority-dot-low"></i>Low priority</span><strong id="lowPriorityCount">0</strong></div>
                         </div>
                     </div>
 
                     <div class="panel">
-                        <div class="panel-header"><div><h3>Follow-up Monitoring</h3><p>Actions requiring attention</p></div></div>
+                        <div class="panel-header"><div><h3>Follow-ups</h3><p>Calls, messages and check-ins you promised</p></div></div>
                         <div class="followup-summary">
-                            <div><strong id="followupsToday">0</strong><span>Due Today</span></div>
+                            <div><strong id="followupsToday">0</strong><span>Due today</span></div>
                             <div><strong id="followupsOverdue">0</strong><span>Overdue</span></div>
                             <div><strong id="followupsUpcoming">0</strong><span>Upcoming</span></div>
                         </div>
@@ -219,7 +223,7 @@
                 </div>
 
                 <div class="panel">
-                    <div class="panel-header"><div><h3>Recent Tasks</h3><p>Latest operational updates</p></div></div>
+                    <div class="panel-header"><div><h3>Recently updated</h3><p>Tap a task to open it</p></div></div>
                     <div class="table-container">
                         <table>
                             <thead><tr><th>Task ID</th><th>Task</th><th>Department</th><th>Owners</th><th>Priority</th><th>Status</th><th>Due Date</th></tr></thead>
@@ -230,7 +234,7 @@
 
                 <div class="panel ecosystem-panel">
                     <div class="ecosystem-copy">
-                        <span class="page-label">THE ECOSYSTEM</span>
+                        <span class="page-label">The ecosystem</span>
                         <h3>One loop, two storefronts</h3>
                         <p>Excelso is the operational backbone connecting UsedbookR.com and SimplySellBooks — every task logged here keeps books moving from buy to resell and back again.</p>
                     </div>
@@ -244,13 +248,12 @@
             <section id="regularTasksPage" class="page">
                 <div class="page-header">
                     <div>
-                        <span class="page-label">RECURRING WORK</span>
+                        <span class="page-label">Recurring work</span>
                         <h2>Regular Tasks</h2>
-                        <p>Complete and update your recurring operational tasks.</p>
+                        <p>Log each recurring job when it's done. The card shows the latest update.</p>
                     </div>
                 </div>
 
-                <!-- Only shown to Founder / Operations Head -->
                 <div id="regularTasksFilterPanel" class="filter-panel regular-tasks-filter-panel" style="display:none;">
                     <div class="filter-field">
                         <label for="regularTasksDepartmentFilter">Department</label>
@@ -270,7 +273,7 @@
             <section id="tasksPage" class="page">
                 <div class="page-header">
                     <div>
-                        <span class="page-label">TASK MANAGEMENT</span>
+                        <span class="page-label">Task management</span>
                         <h2>All Tasks</h2>
                         <p id="tasksScopeText">Manage tasks across all departments.</p>
                     </div>
@@ -281,7 +284,7 @@
                 </div>
 
                 <div class="filter-panel">
-                    <div class="filter-field"><label for="taskSearch">Search</label><input type="search" id="taskSearch" placeholder="Search tasks..."></div>
+                    <div class="filter-field"><label for="taskSearch">Search</label><input type="search" id="taskSearch" placeholder="Search by task, person or ID…"></div>
                     <div class="filter-field"><label for="departmentFilter">Department</label><select id="departmentFilter"><option value="">All Departments</option></select></div>
                     <div class="filter-field">
                         <label for="priorityFilter">Priority</label>
@@ -319,14 +322,14 @@
             <section id="followupsPage" class="page">
                 <div class="page-header">
                     <div>
-                        <span class="page-label">MONITORING</span>
+                        <span class="page-label">Monitoring</span>
                         <h2>Follow-ups</h2>
-                        <p>Monitor commitments and pending actions.</p>
+                        <p>Commitments and pending actions, earliest first.</p>
                     </div>
                 </div>
                 <div class="followup-dashboard">
-                    <div class="followup-card"><span>Due Today</span><strong id="followupPageToday">0</strong></div>
-                    <div class="followup-card"><span>Overdue</span><strong id="followupPageOverdue">0</strong></div>
+                    <div class="followup-card"><span>Due today</span><strong id="followupPageToday">0</strong></div>
+                    <div class="followup-card followup-card-overdue"><span>Overdue</span><strong id="followupPageOverdue">0</strong></div>
                     <div class="followup-card"><span>Upcoming</span><strong id="followupPageUpcoming">0</strong></div>
                 </div>
                 <div class="panel">
@@ -343,9 +346,9 @@
             <section id="backlogPage" class="page">
                 <div class="page-header">
                     <div>
-                        <span class="page-label">FUTURE / PAUSED WORK</span>
+                        <span class="page-label">Future and paused work</span>
                         <h2>Backlog</h2>
-                        <p>Future and paused tasks parked for later, with discussion in comments.</p>
+                        <p>Work parked for later, with the discussion kept in comments.</p>
                     </div>
                     <button type="button" class="primary-button" id="backlogAddButton">+ Add Backlog Item</button>
                 </div>
@@ -362,7 +365,7 @@
             <section id="bookFairPage" class="page">
                 <div class="page-header">
                     <div>
-                        <span class="page-label">EVENTS</span>
+                        <span class="page-label">Events</span>
                         <h2>Book Fair</h2>
                         <p>Book Fair / Events tasks, each with its own checklist.</p>
                     </div>
@@ -377,7 +380,7 @@
             <section id="aiPage" class="page">
                 <div class="page-header">
                     <div>
-                        <span class="page-label">ASK ABOUT YOUR OPERATIONS</span>
+                        <span class="page-label">Ask about your operations</span>
                         <h2>AI Assistant</h2>
                         <p>Ask about tasks, updates, deadlines, changes or team performance. Answers come from the live data in Excelso.</p>
                     </div>
@@ -390,7 +393,7 @@
                         <textarea id="aiInput" rows="2" placeholder="e.g. What is overdue in Warehouse and who owns it?" aria-label="Your question"></textarea>
                         <button type="submit" class="primary-button" id="aiSendButton">Ask</button>
                     </form>
-                    <p class="ai-composer-hint">Enter to send · Shift+Enter for a new line · Click a task ID in an answer to open it</p>
+                    <p class="ai-composer-hint">Enter to send, Shift+Enter for a new line. Click a task ID in an answer to open it.</p>
                 </div>
             </section>
 
@@ -398,7 +401,7 @@
             <section id="departmentsPage" class="page">
                 <div class="page-header">
                     <div>
-                        <span class="page-label">ORGANIZATION</span>
+                        <span class="page-label">Organization</span>
                         <h2>Departments</h2>
                         <p>All 14 departments and their operational workload.</p>
                     </div>
@@ -417,17 +420,17 @@
                     <button id="departmentAddTaskButton" class="primary-button" type="button">+ Add Task</button>
                 </div>
 
-                <div class="kpi-grid">
-                    <div class="kpi-card"><span>Total Tasks</span><strong id="departmentTotal">0</strong></div>
-                    <div class="kpi-card"><span>Open</span><strong id="departmentOpen">0</strong></div>
-                    <div class="kpi-card"><span>In Progress</span><strong id="departmentProgress">0</strong></div>
-                    <div class="kpi-card"><span>On Hold</span><strong id="departmentOnHold">0</strong></div>
-                    <div class="kpi-card"><span>Overdue</span><strong id="departmentOverdue">0</strong></div>
-                    <div class="kpi-card"><span>Completed</span><strong id="departmentCompleted">0</strong></div>
+                <div class="kpi-grid kpi-grid-static">
+                    <div class="kpi-card kpi-total"><span>Total tasks</span><strong id="departmentTotal">0</strong></div>
+                    <div class="kpi-card kpi-open"><span>Open</span><strong id="departmentOpen">0</strong></div>
+                    <div class="kpi-card kpi-progress"><span>In progress</span><strong id="departmentProgress">0</strong></div>
+                    <div class="kpi-card kpi-onhold"><span>On hold</span><strong id="departmentOnHold">0</strong></div>
+                    <div class="kpi-card kpi-overdue"><span>Overdue</span><strong id="departmentOverdue">0</strong></div>
+                    <div class="kpi-card kpi-completed"><span>Completed</span><strong id="departmentCompleted">0</strong></div>
                 </div>
 
                 <div class="panel">
-                    <div class="panel-header"><div><h3>Department Tasks</h3><p id="departmentTasksScopeText">Tasks assigned to this department.</p></div></div>
+                    <div class="panel-header"><div><h3>Department tasks</h3><p id="departmentTasksScopeText">Tasks assigned to this department.</p></div></div>
                     <div class="table-container">
                         <table>
                             <thead><tr><th>ID</th><th>Task</th><th>Owners</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Follow-up</th><th>Checklist</th><th>Action</th></tr></thead>
@@ -441,9 +444,9 @@
             <section id="activityPage" class="page">
                 <div class="page-header">
                     <div>
-                        <span class="page-label">AUDIT TRAIL</span>
+                        <span class="page-label">Audit trail</span>
                         <h2>Activity Log</h2>
-                        <p>Track task changes and follow-up actions.</p>
+                        <p>The most recently changed tasks. Tap one to open it.</p>
                     </div>
                 </div>
                 <div class="panel">
@@ -452,13 +455,22 @@
             </section>
         </div>
     </main>
+
+    <!-- PHONE TAB BAR (hidden on larger screens) -->
+    <nav class="mobile-tabbar" aria-label="Quick navigation">
+        <button type="button" class="tab-item active" data-page="dashboard"><span class="tab-icon" aria-hidden="true">▦</span><span>Home</span></button>
+        <button type="button" class="tab-item" data-page="tasks"><span class="tab-icon" aria-hidden="true">✓</span><span>Tasks</span></button>
+        <button type="button" class="tab-item" data-page="regularTasks"><span class="tab-icon" aria-hidden="true">↺</span><span>Regular</span></button>
+        <button type="button" class="tab-item" data-page="followups"><span class="tab-icon" aria-hidden="true">↻</span><span>Follow-ups</span></button>
+        <button type="button" class="tab-item" data-action="menu"><span class="tab-icon" aria-hidden="true">☰</span><span>More</span></button>
+    </nav>
 </div>
 
 <!-- TASK MODAL -->
 <div id="taskModal" class="modal-overlay" style="display:none;">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
         <div class="modal-header">
-            <div><span class="modal-label">TASK</span><h2 id="taskModalTitle">Add New Task</h2></div>
+            <div><span class="modal-label">Task</span><h2 id="taskModalTitle">Add New Task</h2></div>
             <button id="closeTaskModal" class="modal-close" type="button" aria-label="Close">×</button>
         </div>
 
@@ -467,7 +479,7 @@
             <div class="form-grid">
                 <div class="form-group full-width">
                     <label for="taskName">Task *</label>
-                    <input type="text" id="taskName" placeholder="Enter task" required>
+                    <input type="text" id="taskName" placeholder="What needs doing?" required>
                 </div>
 
                 <div class="form-group full-width">
@@ -482,7 +494,6 @@
 
                 <div class="form-group">
                     <label id="taskOwnersLabel">Owners *</label>
-                    <!-- Filled from the Users sheet. Pick one or more people. -->
                     <div id="taskOwnerPicker" class="owner-picker" aria-labelledby="taskOwnersLabel"></div>
                 </div>
 
@@ -536,29 +547,28 @@
 
     <div class="regular-task-update-modal-card">
         <div class="regular-task-update-modal-header">
-            <div><h2>Update Regular Task</h2><p id="regularTaskUpdateTaskName">Regular Task</p></div>
-            <button type="button" class="regular-task-update-close" onclick="closeRegularTaskUpdate()">×</button>
+            <div><h2>Log regular task</h2><p id="regularTaskUpdateTaskName">Regular Task</p></div>
+            <button type="button" class="regular-task-update-close" onclick="closeRegularTaskUpdate()" aria-label="Close">×</button>
         </div>
 
         <div class="regular-task-update-info">
             <div><span>Task ID</span><strong id="regularTaskUpdateTaskId">-</strong></div>
             <div><span>Department</span><strong id="regularTaskUpdateDepartment">-</strong></div>
-            <div><span>Expected Time</span><strong id="regularTaskUpdateExpectedTime">-</strong></div>
+            <div><span>Expected</span><strong id="regularTaskUpdateExpectedTime">-</strong></div>
         </div>
 
         <form id="regularTaskUpdateForm">
             <div class="form-group">
                 <label for="regularTaskStatus">Status</label>
                 <select id="regularTaskStatus" required>
-                    <option value="">Select status</option>
                     <option value="Completed">Completed</option>
                     <option value="Pending">Pending</option>
                 </select>
             </div>
 
             <div class="form-group">
-                <label for="regularTaskDescription">Description</label>
-                <textarea id="regularTaskDescription" rows="5" placeholder="Enter your update or remarks..." required></textarea>
+                <label for="regularTaskDescription">What was done?</label>
+                <textarea id="regularTaskDescription" rows="5" placeholder="e.g. Swept both floors, bins emptied" required></textarea>
             </div>
 
             <div id="regularTaskUpdateError" class="regular-task-update-error"></div>
@@ -574,14 +584,15 @@
 <!-- TASK DETAIL DRAWER -->
 <div id="taskDetailDrawer" class="detail-drawer" style="display:none;">
     <div class="detail-drawer-overlay" onclick="closeTaskDetailDrawer()"></div>
-    <div class="detail-drawer-panel">
+    <div class="detail-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="taskDetailName">
         <button type="button" class="detail-drawer-close" onclick="closeTaskDetailDrawer()" aria-label="Close">×</button>
 
         <div class="detail-drawer-body">
 
             <div class="detail-drawer-main">
-                <span class="page-label">TASK</span>
+                <span class="page-label">Task</span>
                 <h2 id="taskDetailName">Task name</h2>
+                <p id="taskDetailUpdatedLine" class="detail-drawer-meta-line"></p>
 
                 <div class="detail-drawer-field">
                     <label for="taskDetailDescription">Description</label>
@@ -604,15 +615,25 @@
                     <h3>Comments</h3>
                     <div id="taskDetailComments" class="comment-thread"></div>
                     <form id="taskDetailCommentForm" class="comment-form">
-                        <textarea id="taskDetailCommentInput" rows="2" placeholder="Add a comment..." required></textarea>
+                        <textarea id="taskDetailCommentInput" rows="2" placeholder="Add a comment... (Ctrl+Enter to post)" required></textarea>
                         <button type="submit" class="primary-button">Post Comment</button>
                     </form>
                 </div>
             </div>
 
             <aside class="detail-drawer-meta">
-                <span class="page-label">DETAILS</span>
+                <span class="page-label">Details</span>
 
+                <div class="meta-field">
+                    <label for="taskDetailStatus">Status</label>
+                    <select id="taskDetailStatus">
+                        <option value="Open">Open</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="On Hold">On Hold</option>
+                        <option value="Completed">Completed</option>
+                    </select>
+                    <small class="meta-field-hint">Saves as soon as you change it.</small>
+                </div>
                 <div class="meta-field"><label>Task ID</label><input type="text" id="taskDetailId" disabled></div>
                 <div class="meta-field"><label>Department</label><input type="text" id="taskDetailDepartment" disabled></div>
                 <div class="meta-field">
@@ -626,16 +647,6 @@
                         <option value="Medium">Medium</option>
                         <option value="Low">Low</option>
                     </select>
-                </div>
-                <div class="meta-field">
-                    <label for="taskDetailStatus">Status</label>
-                    <select id="taskDetailStatus">
-                        <option value="Open">Open</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="On Hold">On Hold</option>
-                        <option value="Completed">Completed</option>
-                    </select>
-                    <small class="meta-field-hint">Anyone with access can update status.</small>
                 </div>
                 <div class="meta-field"><label>Created Date</label><input type="date" id="taskDetailCreatedDate" disabled></div>
                 <div class="meta-field"><label for="taskDetailDueDate">Due Date</label><input type="date" id="taskDetailDueDate"></div>
@@ -653,7 +664,7 @@
 <div id="backlogItemModal" class="modal-overlay" style="display:none;">
     <div class="modal">
         <div class="modal-header">
-            <div><span class="modal-label">BACKLOG</span><h2 id="backlogModalTitle">Add Backlog Item</h2></div>
+            <div><span class="modal-label">Backlog</span><h2 id="backlogModalTitle">Add Backlog Item</h2></div>
             <button id="closeBacklogModal" class="modal-close" type="button" aria-label="Close">×</button>
         </div>
 
@@ -705,12 +716,10 @@
 
         <div class="detail-drawer-body detail-drawer-body-single">
             <div class="detail-drawer-main">
-                <span id="backlogDetailStatusLabel" class="page-label">BACKLOG</span>
+                <span id="backlogDetailStatusLabel" class="page-label">Backlog</span>
                 <h2 id="backlogDetailTitle">Backlog item</h2>
                 <p class="detail-drawer-meta-line">
-                    Created <strong id="backlogDetailCreatedDate">-</strong>
-                    <span id="backlogDetailDepartment"></span>
-                    <span id="backlogDetailExpected"></span>
+                    Created <strong id="backlogDetailCreatedDate">-</strong><span id="backlogDetailDepartment"></span><span id="backlogDetailExpected"></span>
                 </p>
                 <p id="backlogDetailDescription" class="detail-drawer-static-description">-</p>
 
@@ -735,10 +744,10 @@
 
         <div class="detail-drawer-body detail-drawer-body-single">
             <div class="detail-drawer-main">
-                <span class="page-label">REGULAR TASK</span>
+                <span class="page-label">Regular task</span>
                 <h2 id="regularTaskChecklistTitle">Task name</h2>
                 <p class="detail-drawer-meta-line">
-                    <strong id="regularTaskChecklistDepartment">-</strong> · Expected <span id="regularTaskChecklistExpectedTime">-</span>
+                    <strong id="regularTaskChecklistDepartment">-</strong>, expected <span id="regularTaskChecklistExpectedTime">-</span>
                 </p>
 
                 <div class="detail-drawer-checklist">
@@ -758,7 +767,7 @@
 </div>
 
 <!-- NOTIFICATION -->
-<div id="notification" class="notification">
+<div id="notification" class="notification" role="status" aria-live="polite">
     <div class="notification-icon" aria-hidden="true">✓</div>
     <div class="notification-body">
         <strong id="notificationTitle">Notification</strong>
@@ -776,7 +785,7 @@
     <span id="actionLoaderText">Saving…</span>
 </div>
 
-<script src="script.js?v=6.3" defer></script>
-<script src="ai.js?v=6.3" defer></script>
+<script src="script.js?v=7.0" defer></script>
+<script src="ai.js?v=7.0" defer></script>
 </body>
 </html>
