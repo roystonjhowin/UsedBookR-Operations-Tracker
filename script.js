@@ -1,6 +1,17 @@
 /* =========================================================
-   EXCELSO OPERATIONS MANAGEMENT SYSTEM
-   FRONTEND JAVASCRIPT
+   EXCELSO OPERATIONS MANAGEMENT SYSTEM — FRONTEND  (v6)
+
+   Pairs with Code.gs v6. Main changes:
+   - Login returns a session token; every request carries it.
+   - One "bootstrap" request loads everything (was 5 requests).
+   - Non-admins see: My Tasks (any department) + a collapsible
+     "Others in <my department>" section, on All Tasks, Regular
+     Tasks and Book Fair.
+   - "Blocked" is now "On Hold".
+   - Owners are picked from a dropdown fed by the Users sheet,
+     and a task can have several owners.
+   - Checklist ticks, new checklist items, comments and status
+     changes update on screen instantly and save in the background.
 ========================================================= */
 
 const API_URL =
@@ -23,21 +34,38 @@ const DEPARTMENTS = [
     "Product Development"
 ];
 
+const STATUS_ON_HOLD = "On Hold";
+
 let tasks = [];
 let regularTasks = [];
+let backlogTasks = [];
+let allChecklists = {};   // taskId / regularTaskId -> [items]
+let allComments = {};     // taskId / backlogId -> [comments]
+let users = [];           // from the Users sheet (for the owner dropdown)
+
+let currentUser = null;
+let sessionToken = "";
+
 let currentDepartment = "";
 let currentPage = "dashboard";
-let editingTaskId = "";
-let isSavingTask = false;
-let currentUser = null;
+
+let dataEverLoaded = false;
+let dataLoadFailed = false;
+let lastLoadedAt = 0;
+let coreLoadPromise = null;
+
+let taskDetailCurrentId = "";
+let backlogDetailCurrentId = "";
+let regularTaskChecklistCurrentId = "";
+
+// Which "Others in my department" sections are expanded, per page.
+const expandedSections = {};
+
+let taskOwnerPicker = null;
+let taskDetailOwnerPicker = null;
 
 /* =========================================================
-   PERFORMANCE HELPERS
-   debounce(): stops fast-typing (search boxes) from triggering a
-   full re-render on every keystroke — we wait for a short pause
-   instead. batchRows(): appends many <tr>/<div> nodes to the DOM
-   in a single reflow via a DocumentFragment instead of one reflow
-   per row, which is what made large tables/lists feel choppy.
+   SMALL HELPERS
 ========================================================= */
 
 function debounce(fn, wait = 150) {
@@ -50,73 +78,102 @@ function debounce(fn, wait = 150) {
 
 function batchRows(container, items, buildNode) {
     const fragment = document.createDocumentFragment();
-    items.forEach(function (item) {
-        fragment.appendChild(buildNode(item));
-    });
+    items.forEach(function (item) { fragment.appendChild(buildNode(item)); });
     container.appendChild(fragment);
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+const escapeHTML = escapeHtml;
+
+function setText(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+}
+
+function setInput(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.value = value || "";
+}
+
+function getInput(id) {
+    const element = document.getElementById(id);
+    return element ? element.value : "";
+}
+
+function csvEscape(value) {
+    return '"' + String(value ?? "").replace(/"/g, '""') + '"';
+}
+
+function wait(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+function tempId(prefix) {
+    return "tmp-" + prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
 /* =========================================================
-   LOCAL CACHE (stale-while-revalidate)
-   Google Apps Script round trips are slow enough that waiting
-   for a fresh fetch on every single page load/refresh is what
-   made the app feel sluggish and sometimes look blank. Instead,
-   the last successful response for each dataset is kept in
-   sessionStorage: on load we paint that immediately (usually
-   instant, since it's just localStorage-speed JSON parsing),
-   then quietly fetch a fresh copy in the background and update
-   once it arrives. If the fresh fetch fails, we simply keep
-   showing the last good data (flagged via the banner) instead
-   of wiping the screen to empty.
+   LOCAL CACHE — instant paint on refresh, per user
 ========================================================= */
 
-const CACHE_PREFIX = "usedbookrCache:";
+const CACHE_PREFIX = "usedbookrCache6:";
 
-function saveCache(key, data) {
+function cacheKeyForUser() {
+    return CACHE_PREFIX + String(currentUser?.username || "").toLowerCase();
+}
+
+function persistLocalCache() {
+    if (!currentUser) return;
     try {
-        sessionStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ data: data, savedAt: Date.now() }));
+        sessionStorage.setItem(cacheKeyForUser(), JSON.stringify({
+            savedAt: Date.now(),
+            tasks: tasks,
+            regularTasks: regularTasks,
+            backlog: backlogTasks,
+            users: users,
+            checklists: allChecklists,
+            comments: allComments
+        }));
     } catch (error) {
-        // sessionStorage full/unavailable (e.g. private browsing) — caching
-        // is a nice-to-have, not a hard requirement, so just skip it.
+        // storage full / private mode — caching is optional
     }
 }
 
-function readCache(key) {
+const persistLocalCacheSoon = debounce(persistLocalCache, 400);
+
+function readLocalCache() {
     try {
-        const raw = sessionStorage.getItem(CACHE_PREFIX + key);
-        if (!raw) return null;
-        return JSON.parse(raw);
+        const raw = sessionStorage.getItem(cacheKeyForUser());
+        return raw ? JSON.parse(raw) : null;
     } catch (error) {
         return null;
     }
 }
 
-/* =========================================================
-   SKELETON LOADERS
-   Lightweight shimmer placeholders shown while a table/grid's
-   first batch of data is still loading, instead of a bare
-   "Loading..." text string — purely a perceived-speed /
-   smoothness improvement, no functional effect.
-========================================================= */
-
-function skeletonTableRows(colspan, count = 5) {
-    let html = "";
-    for (let i = 0; i < count; i++) {
-        html += `<tr class="skeleton-row"><td colspan="${colspan}"><div class="skeleton-bar" style="width:${85 - i * 6}%;"></div></td></tr>`;
-    }
-    return html;
+function clearLocalCaches() {
+    try {
+        Object.keys(sessionStorage).forEach(function (key) {
+            if (key.indexOf("usedbookrCache") === 0) sessionStorage.removeItem(key);
+        });
+    } catch (error) { /* ignore */ }
 }
+
+/* =========================================================
+   SKELETONS
+========================================================= */
 
 function skeletonCards(count = 4) {
     let html = "";
     for (let i = 0; i < count; i++) {
-        html += `
-            <div class="skeleton-card">
-                <div class="skeleton-bar skeleton-bar-title"></div>
-                <div class="skeleton-bar" style="width:70%;"></div>
-                <div class="skeleton-bar" style="width:45%;"></div>
-            </div>
-        `;
+        html += `<div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:70%;"></div><div class="skeleton-bar" style="width:45%;"></div></div>`;
     }
     return html;
 }
@@ -130,6 +187,7 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeDepartments();
     initializeDate();
     initializeNavigation();
+    initializeOwnerPickers();
     initializeTaskButtons();
     initializeFilters();
     initializeTaskForm();
@@ -140,58 +198,40 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeRegularTaskUpdateForm();
     initializeExports();
     initializeSidebarToggle();
-    checkLogin();
-    initializePageLoader();
-
     initializeBacklog();
     initializeBookFair();
     initializeTaskDetailDrawer();
-    initializeAllTasksTableDelegation();
+    initializeTableDelegation();
+    initializeRegularTasksPage();
+    initializeKeyboardShortcuts();
+    initializeBackgroundRefresh();
 
-    initializeRegularTasksFilter();
-    initializeRegularTasksDelegation();
-    initializeRegularTaskChecklistDrawer();
-    initializeMyTasksOnRegularPageDelegation();
+    checkLogin();
+    initializePageLoader();
 
 });
 
-/* =========================================================
-   PAGE LOADER
-========================================================= */
-
 function initializePageLoader() {
 
-    // Kept short on purpose: just enough to avoid an ugly flash of
-    // unstyled content, without making every load feel sluggish.
-    const MIN_VISIBLE_MS = 350;
+    const MIN_VISIBLE_MS = 300;
     const FADE_MS = 300;
     const start = Date.now();
+    let done = false;
 
     const hide = function () {
-
-        const elapsed = Date.now() - start;
-        const remaining = Math.max(0, MIN_VISIBLE_MS - elapsed);
-
+        if (done) return;
+        done = true;
+        const remaining = Math.max(0, MIN_VISIBLE_MS - (Date.now() - start));
         setTimeout(function () {
-
             const loader = document.getElementById("pageLoader");
-
-            if (loader) {
-
-                loader.classList.add("loader-hidden");
-
-                setTimeout(function () {
-                    loader.style.display = "none";
-                }, FADE_MS);
-            }
-
+            if (!loader) return;
+            loader.classList.add("loader-hidden");
+            setTimeout(function () { loader.style.display = "none"; }, FADE_MS);
         }, remaining);
-
     };
 
-    if (document.readyState === "complete") {
-        hide();
-    } else {
+    if (document.readyState === "complete") hide();
+    else {
         window.addEventListener("load", hide);
         setTimeout(hide, 1200);
     }
@@ -199,7 +239,7 @@ function initializePageLoader() {
 }
 
 /* =========================================================
-   LOGIN / AUTHENTICATION
+   LOGIN / SESSION
 ========================================================= */
 
 function initializeLogin() {
@@ -216,16 +256,16 @@ function initializeLogin() {
         const error = document.getElementById("loginError");
         const submitButton = form.querySelector(".login-button");
 
-        if (error) {
-            error.classList.remove("show");
-            error.textContent = "";
-        }
+        const showError = function (message) {
+            if (!error) return;
+            error.textContent = message;
+            error.classList.add("show");
+        };
+
+        if (error) { error.classList.remove("show"); error.textContent = ""; }
 
         if (!username || !password) {
-            if (error) {
-                error.textContent = "Please enter your username and password.";
-                error.classList.add("show");
-            }
+            showError("Please enter your username and password.");
             return;
         }
 
@@ -233,44 +273,25 @@ function initializeLogin() {
 
         try {
 
-            const result = await apiRequest("login", { username: username, password: password });
+            const result = await apiRequest("login", { username: username, password: password }, { silent: true });
 
-
-            if (!result || !result.success || !result.user) {
-
-                if (error) {
-                    error.textContent = result?.message || "Invalid username or password.";
-                    error.classList.add("show");
-                }
-
-                setButtonLoading(submitButton, false);
+            if (!result || !result.success || !result.user || !result.token) {
+                showError(result?.message || "Invalid username or password.");
                 return;
             }
 
             currentUser = result.user;
+            sessionToken = result.token;
 
             sessionStorage.setItem("usedbookrCurrentUser", JSON.stringify(currentUser));
-            sessionStorage.setItem("usedbookrOperationsLogin", "true");
+            sessionStorage.setItem("usedbookrSessionToken", sessionToken);
 
-            hideLogin();
-            updateLoggedInUserProfile();
-            applyUserAccess();
-
-            // Fires all core reads together (rather than one after another)
-            // and now actually checks whether any of them failed — see
-            // loadCoreData() — instead of assuming success and moving on.
-            await loadCoreData();
+            enterApp();
 
         }
         catch (err) {
-
             console.error("LOGIN ERROR:", err);
-
-            if (error) {
-                error.textContent = "Unable to connect to the authentication server.";
-                error.classList.add("show");
-            }
-
+            showError("Unable to connect to the server. Check your internet connection and try again.");
         }
         finally {
             setButtonLoading(submitButton, false);
@@ -280,318 +301,292 @@ function initializeLogin() {
 
 }
 
-/* =========================================================
-   PASSWORD VISIBILITY TOGGLE
-========================================================= */
+function checkLogin() {
+
+    const savedUser = sessionStorage.getItem("usedbookrCurrentUser");
+    const savedToken = sessionStorage.getItem("usedbookrSessionToken");
+
+    if (savedUser && savedToken) {
+        try {
+            currentUser = JSON.parse(savedUser);
+            sessionToken = savedToken;
+            enterApp();
+            return;
+        }
+        catch (error) {
+            console.error("SESSION RESTORE ERROR:", error);
+        }
+    }
+
+    // Old (pre-v6) sessions have no token — ask them to sign in once.
+    logoutUser({ silent: true });
+
+}
+
+function enterApp() {
+
+    hideLogin();
+    updateLoggedInUserProfile();
+    applyUserAccess();
+
+    // Paint the last known data for this user instantly, then refresh.
+    const cached = readLocalCache();
+    if (cached) applyDataSnapshot(cached);
+
+    renderCurrentPage();
+    loadCoreData();
+
+}
+
+function logoutUser(options = {}) {
+
+    if (sessionToken && !options.silent) {
+        // Fire-and-forget: tell the server to end the session.
+        apiRequest("logout", {}, { silent: true });
+    }
+
+    currentUser = null;
+    sessionToken = "";
+    tasks = [];
+    regularTasks = [];
+    backlogTasks = [];
+    allChecklists = {};
+    allComments = {};
+    users = [];
+    dataEverLoaded = false;
+
+    sessionStorage.removeItem("usedbookrCurrentUser");
+    sessionStorage.removeItem("usedbookrSessionToken");
+    sessionStorage.removeItem("usedbookrOperationsLogin");
+    clearLocalCaches();
+
+    closeAllOverlays();
+    showLogin();
+
+    setInput("loginUsername", "");
+    setInput("loginPassword", "");
+
+}
+
+function handleSessionExpired() {
+
+    const wasLoggedIn = !!currentUser;
+
+    logoutUser({ silent: true });
+
+    if (wasLoggedIn) {
+        const error = document.getElementById("loginError");
+        if (error) {
+            error.textContent = "Your session has expired. Please sign in again.";
+            error.classList.add("show");
+        }
+    }
+
+}
+
+function hideLogin() {
+    const login = document.getElementById("loginScreen");
+    const app = document.getElementById("app");
+    if (login) login.style.display = "none";
+    if (app) app.style.display = "flex";
+}
+
+function showLogin() {
+    const login = document.getElementById("loginScreen");
+    const app = document.getElementById("app");
+    if (login) login.style.display = "flex";
+    if (app) app.style.display = "none";
+}
 
 function initializePasswordToggle() {
 
     const toggle = document.getElementById("togglePasswordVisibility");
     const input = document.getElementById("loginPassword");
-
     if (!toggle || !input) return;
 
     const eyeIcon = toggle.querySelector(".icon-eye");
     const eyeOffIcon = toggle.querySelector(".icon-eye-off");
 
     toggle.addEventListener("click", function () {
-
-        const isCurrentlyHidden = input.type === "password";
-
-        input.type = isCurrentlyHidden ? "text" : "password";
-
-        toggle.setAttribute("aria-pressed", String(isCurrentlyHidden));
-        toggle.setAttribute("aria-label", isCurrentlyHidden ? "Hide password" : "Show password");
-
-        if (eyeIcon) eyeIcon.style.display = isCurrentlyHidden ? "none" : "";
-        if (eyeOffIcon) eyeOffIcon.style.display = isCurrentlyHidden ? "" : "none";
-
-        // Keep focus + cursor position in the field after toggling.
+        const hidden = input.type === "password";
+        input.type = hidden ? "text" : "password";
+        toggle.setAttribute("aria-pressed", String(hidden));
+        toggle.setAttribute("aria-label", hidden ? "Hide password" : "Show password");
+        if (eyeIcon) eyeIcon.style.display = hidden ? "none" : "";
+        if (eyeOffIcon) eyeOffIcon.style.display = hidden ? "" : "none";
         input.focus();
-
     });
 
 }
 
 function setButtonLoading(button, isLoading) {
-
     if (!button) return;
-
-    if (isLoading) {
-        button.classList.add("is-loading");
-        button.disabled = true;
-    } else {
-        button.classList.remove("is-loading");
-        button.disabled = false;
-    }
-
+    button.classList.toggle("is-loading", !!isLoading);
+    button.disabled = !!isLoading;
 }
 
-/* =========================================================
-   CHECK LOGIN
-========================================================= */
-
-function checkLogin() {
-
-    const loggedIn = sessionStorage.getItem("usedbookrOperationsLogin");
-    const savedUser = sessionStorage.getItem("usedbookrCurrentUser");
-
-    if (loggedIn === "true" && savedUser) {
-
-        try {
-
-            currentUser = JSON.parse(savedUser);
-
-            hideLogin();
-            updateLoggedInUserProfile();
-            applyUserAccess();
-            loadCoreData();
-
-        }
-        catch (error) {
-            console.error("SESSION RESTORE ERROR:", error);
-            logoutUser();
-        }
-
-    } else {
-        showLogin();
-    }
-
+function initializeLogout() {
+    const button = document.getElementById("logoutButton");
+    if (button) button.addEventListener("click", function () { logoutUser(); });
 }
-
-/* =========================================================
-   LOAD CORE DATA
-   Runs every data load the app needs on startup (or after
-   login) together, and — unlike firing five independent async
-   calls and never checking their outcome — actually notices if
-   any of them failed. If the essentials (Master Tasks or
-   Regular Tasks) couldn't be loaded, this surfaces a clear
-   "couldn't load your data" banner with a Retry button instead
-   of quietly leaving the screen looking blank/half-loaded.
-========================================================= */
-
-async function loadCoreData() {
-
-    const results = await Promise.allSettled([
-        loadTasks(),
-        loadRegularTasks(),
-        loadAllChecklists(),
-        loadAllComments(),
-        loadBacklogTasks()
-    ]);
-
-    const anyRejected = results.some(function (r) { return r.status === "rejected"; });
-
-    if (anyRejected || tasksLoadFailed || regularTasksLoadFailed || backlogLoadFailed) {
-
-        showGlobalStatusBanner(
-            "Couldn't refresh some data just now — you may be viewing slightly outdated information.",
-            { isError: true, onRetry: loadCoreData }
-        );
-
-    } else {
-        hideGlobalStatusBanner();
-    }
-
-}
-
-/* =========================================================
-   HIDE / SHOW LOGIN
-========================================================= */
-
-function hideLogin() {
-
-    const login = document.getElementById("loginScreen");
-    const app = document.getElementById("app");
-
-    if (login) login.style.display = "none";
-    if (app) app.style.display = "flex";
-
-}
-
-function showLogin() {
-
-    const login = document.getElementById("loginScreen");
-    const app = document.getElementById("app");
-
-    if (login) login.style.display = "flex";
-    if (app) app.style.display = "none";
-
-}
-
-/* =========================================================
-   UPDATE LOGGED-IN USER PROFILE
-========================================================= */
 
 function updateLoggedInUserProfile() {
 
-    if (!currentUser) {
-        console.warn("No current user available for profile display.");
-        return;
-    }
-
-    const avatar = document.getElementById("loggedUserAvatar");
-    const nameElement = document.getElementById("loggedUserName");
-    const roleElement = document.getElementById("loggedUserRole");
+    if (!currentUser) return;
 
     const name = String(currentUser.name || "").trim();
     const role = String(currentUser.role || "").trim();
     const username = String(currentUser.username || "").trim();
 
-    if (nameElement) nameElement.textContent = name || username || "User";
-    if (roleElement) roleElement.textContent = role || "User";
+    setText("loggedUserName", name || username || "User");
+    setText("loggedUserRole", role || "User");
 
-    let initials = "";
+    const words = name.replace(/\./g, " ").split(/\s+/).filter(Boolean);
+    let initials = words.length >= 2 ? words[0][0] + words[words.length - 1][0] : (words[0] || username).substring(0, 2);
 
-    if (name) {
+    setText("loggedUserAvatar", initials.toUpperCase());
 
-        const words = name.replace(/\./g, " ").split(/\s+/).filter(function(word) { return word.length > 0; });
+}
 
-        if (words.length >= 2) {
-            initials = words[0].charAt(0) + words[words.length - 1].charAt(0);
-        } else {
-            initials = words[0].substring(0, 2);
-        }
+/* Non-admins: scope text, hide the admin-only department filter
+   on Regular Tasks. */
+function applyUserAccess() {
 
+    if (!currentUser) return;
+
+    const privileged = isPrivilegedUser();
+    const primary = primaryDepartment();
+
+    const filterPanel = document.getElementById("regularTasksFilterPanel");
+    if (filterPanel) filterPanel.style.display = privileged ? "" : "none";
+
+    if (privileged) {
+        setText("tasksScopeText", "Manage tasks across all departments.");
+        setText("dashboardScopeText", "Monitor tasks, priorities and follow-ups across all 14 departments.");
+        setText("totalTasksScope", "All departments");
+    } else {
+        const deptText = primary ? ` and the rest of ${primary}` : "";
+        setText("tasksScopeText", `Your tasks across every department${deptText}.`);
+        setText("dashboardScopeText", `Your tasks${deptText}.`);
+        setText("totalTasksScope", primary ? `Yours + ${primary}` : "Assigned to you");
     }
 
-    if (!initials) initials = username.substring(0, 2);
-
-    if (avatar) avatar.textContent = initials.toUpperCase();
-
 }
 
 /* =========================================================
-   LOGOUT
+   ROLE / OWNER HELPERS
 ========================================================= */
 
-function initializeLogout() {
-
-    const button = document.getElementById("logoutButton");
-    if (!button) return;
-
-    button.addEventListener("click", function () { logoutUser(); });
-
+function isPrivilegedUser() {
+    if (!currentUser) return false;
+    const role = String(currentUser.role || "").trim().toLowerCase();
+    return role === "founder" || role === "operations head";
 }
 
-function logoutUser() {
+function primaryDepartment() {
+    const primary = String(currentUser?.primaryDepartment || "").trim();
+    return primary && primary.toLowerCase() !== "all" ? primary : "";
+}
 
-    currentUser = null;
+function currentUserLabel() {
+    return (currentUser && (currentUser.name || currentUser.username)) || "Website";
+}
 
-    // so the Regular Tasks department filter re-defaults to the next
-    // logged-in user's own primary department instead of keeping
-    // whatever the previous session had selected.
-    regularTasksFilterDefaulted = false;
+/* Splits "Tarun, Royston" / "Tarun/Bhuvana" into separate names. */
+function splitOwners(value) {
+    return String(value || "")
+        .split(/[,;\/&\n]+/)
+        .map(function (s) { return s.trim(); })
+        .filter(Boolean);
+}
 
-    // Reset "have we loaded this yet" flags so the next login's first
-    // loadTasks()/loadRegularTasks()/loadBacklogTasks() call is allowed
-    // to instant-paint from cache again (safe: filtering by user happens
-    // at render time, not at cache-write time).
-    tasksEverLoaded = false;
-    regularTasksEverLoaded = false;
-    backlogEverLoaded = false;
+function joinOwners(list) {
+    return list.join(", ");
+}
 
-    sessionStorage.removeItem("usedbookrOperationsLogin");
-    sessionStorage.removeItem("usedbookrCurrentUser");
+/* Makes "Mr.Tarun", "tarun" and "Tarun " compare equal. */
+function normalizePersonName(value) {
+    return String(value || "")
+        .toLowerCase()
+        .replace(/^\s*(mr|mrs|ms|miss|dr|sri|smt)(\.\s*|\s+)/i, "")
+        .replace(/[^a-z0-9 ]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
 
-    showLogin();
+/* A stored owner name matches a user when it equals their name,
+   their username, or just their first name ("Sundara" → "Sundara Gandhi"). */
+function ownerMatchesUser(ownerToken, user) {
+    const owner = normalizePersonName(ownerToken);
+    if (!owner || !user) return false;
 
-    const username = document.getElementById("loginUsername");
-    const password = document.getElementById("loginPassword");
+    const name = normalizePersonName(user.name);
+    const username = normalizePersonName(user.username);
 
-    if (username) username.value = "";
-    if (password) password.value = "";
+    if (owner === name || owner === username) return true;
 
+    const firstName = name.split(" ")[0];
+    return !!firstName && owner === firstName;
+}
+
+function currentUserMatches(assignedTo) {
+    if (!currentUser) return false;
+    return splitOwners(assignedTo).some(function (token) { return ownerMatchesUser(token, currentUser); });
+}
+
+function ownersDisplay(assignedTo) {
+    const owners = splitOwners(assignedTo);
+    if (!owners.length) return `<span class="owner-none">Unassigned</span>`;
+    return owners.map(function (owner) {
+        const mine = ownerMatchesUser(owner, currentUser);
+        return `<span class="owner-chip${mine ? " owner-chip-me" : ""}">${escapeHtml(owner)}</span>`;
+    }).join("");
+}
+
+/* Same rule as the server: admins see everything; others see their
+   own items (any department) plus their primary department. */
+function canSeeItem(item) {
+    if (!currentUser) return false;
+    if (isPrivilegedUser()) return true;
+    if (currentUserMatches(item.assignedTo)) return true;
+    const primary = primaryDepartment();
+    return !!primary && String(item.department || "").trim().toLowerCase() === primary.toLowerCase();
 }
 
 /* =========================================================
-   USER ACCESS
+   STATUS
 ========================================================= */
 
-function applyUserAccess() {
-    if (!currentUser) return;
+function normalizeStatus(status) {
+    const s = String(status || "").trim();
+    const lower = s.toLowerCase();
+    if (lower === "blocked" || lower === "on hold" || lower === "onhold" || lower === "hold") return STATUS_ON_HOLD;
+    if (lower === "in progress" || lower === "inprogress") return "In Progress";
+    if (lower === "open") return "Open";
+    if (lower === "completed" || lower === "done") return "Completed";
+    return s || "Open";
 }
 
 /* =========================================================
-   DEPARTMENTS (dropdowns + cards)
+   DEPARTMENTS (dropdowns)
 ========================================================= */
+
+function fillDepartmentSelect(id, firstLabel) {
+    const select = document.getElementById(id);
+    if (!select) return;
+    select.innerHTML = `<option value="">${escapeHtml(firstLabel)}</option>` +
+        DEPARTMENTS.map(function (d) { return `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`; }).join("");
+}
 
 function initializeDepartments() {
-
-    const select = document.getElementById("taskDepartment");
-    const filter = document.getElementById("departmentFilter");
-
-    if (select) {
-
-        select.innerHTML = '<option value="">Select Department</option>';
-
-        DEPARTMENTS.forEach(function (department) {
-            const option = document.createElement("option");
-            option.value = department;
-            option.textContent = department;
-            select.appendChild(option);
-        });
-
-    }
-
-    if (filter) {
-
-        filter.innerHTML = '<option value="">All Departments</option>';
-
-        DEPARTMENTS.forEach(function (department) {
-            const option = document.createElement("option");
-            option.value = department;
-            option.textContent = department;
-            filter.appendChild(option);
-        });
-
-    }
-
-    const backlogSelect = document.getElementById("backlogDepartment");
-
-    if (backlogSelect) {
-
-        backlogSelect.innerHTML = '<option value="">Unassigned</option>';
-
-        DEPARTMENTS.forEach(function (department) {
-            const option = document.createElement("option");
-            option.value = department;
-            option.textContent = department;
-            backlogSelect.appendChild(option);
-        });
-
-    }
-
-    const backlogFilter = document.getElementById("backlogDepartmentFilter");
-
-    if (backlogFilter) {
-
-        backlogFilter.innerHTML = '<option value="">All Departments</option>';
-
-        DEPARTMENTS.forEach(function (department) {
-            const option = document.createElement("option");
-            option.value = department;
-            option.textContent = department;
-            backlogFilter.appendChild(option);
-        });
-
-    }
-
-    renderDepartmentCards();
-
+    fillDepartmentSelect("taskDepartment", "Select Department");
+    fillDepartmentSelect("departmentFilter", "All Departments");
+    fillDepartmentSelect("backlogDepartment", "Unassigned");
+    fillDepartmentSelect("backlogDepartmentFilter", "All Departments");
 }
 
-/* =========================================================
-   DATE
-========================================================= */
-
 function initializeDate() {
-
-    const element = document.getElementById("currentDate");
-    if (!element) return;
-
-    element.textContent = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-
+    setText("currentDate", new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }));
 }
 
 /* =========================================================
@@ -601,292 +596,223 @@ function initializeDate() {
 function initializeNavigation() {
 
     document.querySelectorAll(".nav-item").forEach(function (item) {
-
         item.addEventListener("click", function () {
-
-            const page = item.dataset.page;
-            const department = item.dataset.department;
-
-            if (department) {
-                openDepartment(department);
-                closeSidebarOnMobile();
-                return;
-            }
-
-            if (page) {
-                showPage(page);
-                closeSidebarOnMobile();
-            }
-
+            if (item.dataset.department) openDepartment(item.dataset.department);
+            else if (item.dataset.page) showPage(item.dataset.page);
+            closeSidebarOnMobile();
         });
-
     });
 
     const menu = document.getElementById("menuToggle");
-
-    if (menu) {
-        menu.addEventListener("click", function () { toggleSidebar(); });
-    }
+    if (menu) menu.addEventListener("click", toggleSidebar);
 
 }
 
-/* =========================================================
-   MOBILE SIDEBAR TOGGLE
-========================================================= */
-
 function initializeSidebarToggle() {
-
     const backdrop = document.getElementById("sidebarBackdrop");
-
-    if (backdrop) {
-        backdrop.addEventListener("click", closeSidebarOnMobile);
-    }
-
+    if (backdrop) backdrop.addEventListener("click", closeSidebarOnMobile);
 }
 
 function toggleSidebar() {
-
     const sidebar = document.querySelector(".sidebar");
     const backdrop = document.getElementById("sidebarBackdrop");
     const menu = document.getElementById("menuToggle");
-
     if (!sidebar) return;
-
     const isOpen = sidebar.classList.toggle("sidebar-open");
-
     if (backdrop) backdrop.classList.toggle("show", isOpen);
     if (menu) menu.classList.toggle("is-open", isOpen);
-
 }
 
 function closeSidebarOnMobile() {
-
-    const sidebar = document.querySelector(".sidebar");
-    const backdrop = document.getElementById("sidebarBackdrop");
-    const menu = document.getElementById("menuToggle");
-
-    if (sidebar) sidebar.classList.remove("sidebar-open");
-    if (backdrop) backdrop.classList.remove("show");
-    if (menu) menu.classList.remove("is-open");
-
+    document.querySelector(".sidebar")?.classList.remove("sidebar-open");
+    document.getElementById("sidebarBackdrop")?.classList.remove("show");
+    document.getElementById("menuToggle")?.classList.remove("is-open");
 }
 
 function showPage(page) {
 
     currentPage = page;
 
-    document.querySelectorAll(".page").forEach(function (section) {
-        section.classList.remove("active-page");
-    });
-
-    const target = document.getElementById(page + "Page");
-    if (target) target.classList.add("active-page");
+    document.querySelectorAll(".page").forEach(function (section) { section.classList.remove("active-page"); });
+    document.getElementById(page + "Page")?.classList.add("active-page");
 
     document.querySelectorAll(".nav-item").forEach(function (item) {
-        item.classList.remove("active");
-        if (item.dataset.page === page) item.classList.add("active");
+        item.classList.toggle("active", item.dataset.page === page);
     });
 
     updatePageHeader(page);
-
-    if (page === "dashboard") updateDashboard();
-    if (page === "tasks") renderTasksTable();
-    if (page === "regularTasks") { renderRegularTasks(); renderMyTasksOnRegularPage(); }
-    if (page === "followups") renderFollowups();
-    if (page === "activity") renderActivity();
-    if (page === "backlog") renderBacklog();
-    if (page === "bookFair") renderBookFair();
+    renderCurrentPage();
 
 }
 
 function updatePageHeader(page) {
 
-    const title = document.getElementById("pageTitle");
-    const subtitle = document.getElementById("pageSubtitle");
-
     const names = {
         dashboard: ["Operations Dashboard", "Centralized operational monitoring"],
-        tasks: ["All Tasks", "Manage tasks across all departments"],
+        tasks: ["All Tasks", isPrivilegedUser() ? "Manage tasks across all departments" : "Your tasks and your department's tasks"],
         regularTasks: ["Regular Tasks", "Complete and update your recurring operational tasks"],
         followups: ["Follow-ups", "Monitor commitments and pending actions"],
         activity: ["Activity Log", "Track operational changes"],
         backlog: ["Backlog", "Future and paused tasks parked for later"],
-        bookFair: ["Book Fair", "Priority tasks and checklists for Book Fair / Events"],
+        bookFair: ["Book Fair", "Tasks and checklists for Book Fair / Events"]
     };
 
     if (names[page]) {
-        if (title) title.textContent = names[page][0];
-        if (subtitle) subtitle.textContent = names[page][1];
+        setText("pageTitle", names[page][0]);
+        setText("pageSubtitle", names[page][1]);
+    }
+
+}
+
+/* Only re-render what's on screen — switching pages renders the new one. */
+function renderCurrentPage() {
+
+    switch (currentPage) {
+        case "dashboard": updateDashboard(); break;
+        case "tasks": renderTasksTable(); break;
+        case "regularTasks": renderRegularTasks(); break;
+        case "followups": updateFollowupSummary(); renderFollowups(); break;
+        case "activity": renderActivity(); break;
+        case "backlog": renderBacklog(); break;
+        case "bookFair": renderBookFair(); break;
+        case "department": if (currentDepartment) showDepartmentPage(currentDepartment); break;
+        case "departments": renderDepartmentCards(); break;
     }
 
 }
 
 /* =========================================================
-   API
-========================================================= */
-
-/* =========================================================
    GLOBAL STATUS BANNER
-   A single, always-visible way to tell the user "still loading"
-   or "that failed" instead of the app just going quiet. Google
-   Apps Script backends can take several seconds to respond
-   (especially on a cold start), which previously showed no
-   feedback at all and looked like a blank/broken page.
 ========================================================= */
 
 let globalStatusRetryHandler = null;
 
 function initializeGlobalStatusBanner() {
-
-    const dismissButton = document.getElementById("globalStatusBannerDismiss");
-    const retryButton = document.getElementById("globalStatusBannerRetry");
-
-    if (dismissButton) {
-        dismissButton.addEventListener("click", hideGlobalStatusBanner);
-    }
-
-    if (retryButton) {
-        retryButton.addEventListener("click", function () {
-            if (typeof globalStatusRetryHandler === "function") {
-                globalStatusRetryHandler();
-            }
-        });
-    }
-
+    document.getElementById("globalStatusBannerDismiss")?.addEventListener("click", hideGlobalStatusBanner);
+    document.getElementById("globalStatusBannerRetry")?.addEventListener("click", function () {
+        if (typeof globalStatusRetryHandler === "function") globalStatusRetryHandler();
+    });
 }
 
 function showGlobalStatusBanner(message, options = {}) {
 
     const banner = document.getElementById("globalStatusBanner");
-    const text = document.getElementById("globalStatusBannerText");
     const retryButton = document.getElementById("globalStatusBannerRetry");
-
     if (!banner) return;
 
-    if (text) text.textContent = message;
+    // Never let a "still loading" notice cover up a real error.
+    if (options.kind === "slow" && banner.classList.contains("show") && banner.dataset.kind === "error") return;
 
+    setText("globalStatusBannerText", message);
+    banner.dataset.kind = options.kind || (options.isError ? "error" : "info");
     banner.classList.toggle("is-error", !!options.isError);
     banner.classList.add("show");
 
     if (retryButton) {
-        if (options.onRetry) {
-            globalStatusRetryHandler = options.onRetry;
-            retryButton.style.display = "";
-        } else {
-            globalStatusRetryHandler = null;
-            retryButton.style.display = "none";
-        }
+        globalStatusRetryHandler = options.onRetry || null;
+        retryButton.style.display = options.onRetry ? "" : "none";
     }
 
 }
 
 function hideGlobalStatusBanner() {
-
     const banner = document.getElementById("globalStatusBanner");
     if (banner) banner.classList.remove("show");
-
     globalStatusRetryHandler = null;
+}
 
+let slowRequestCount = 0;
+
+function slowRequestStarted() {
+    slowRequestCount++;
+    showGlobalStatusBanner("Still working — Google Sheets is taking longer than usual…", { kind: "slow" });
+}
+
+function slowRequestEnded() {
+    slowRequestCount = Math.max(0, slowRequestCount - 1);
+    const banner = document.getElementById("globalStatusBanner");
+    if (slowRequestCount === 0 && banner && banner.dataset.kind === "slow") hideGlobalStatusBanner();
 }
 
 /* =========================================================
    API REQUEST
-   Improvements over a bare single-attempt fetch():
-   - A hard timeout (via AbortController) so a stalled request
-     doesn't hang forever with no feedback.
-   - A "still loading" banner if any request is taking longer
-     than a couple of seconds, so slow Apps Script responses
-     don't just look like a frozen/blank page.
-   - Automatic retry, but ONLY for network-level failures
-     (dropped connection, timeout) on actions that are safe to
-     repeat. Actions that CREATE a new row (createTask,
-     addChecklistItem, etc.) are never auto-retried, since
-     retrying a create after the first attempt actually
-     succeeded server-side would create a duplicate. This is
-     also why an update can occasionally still show "Connection
-     Error" even though it saved: the write reached Google
-     Sheets, but the response never made it back to the browser.
-     Read/update-style actions ARE safe to retry automatically,
-     which resolves most of that flakiness on its own.
+   - Sends the session token with every call.
+   - Times out instead of hanging forever.
+   - Retries only safe (repeatable) actions after a dropped
+     connection. Anything that ADDS a row is never retried,
+     otherwise it could be saved twice.
 ========================================================= */
 
 const NON_IDEMPOTENT_ACTIONS = new Set([
-    "createTask", "addTask", "createBacklogTask", "addChecklistItem",
-    "addTaskComment", "addBookFairChecklistItem", "moveBacklogToTask"
+    "login", "createTask", "addTask", "createBacklogTask", "addChecklistItem",
+    "addTaskComment", "addBookFairChecklistItem", "moveBacklogToTask",
+    "saveRegularTaskUpdate", "deleteChecklistItem", "deleteTask"
 ]);
 
-const REQUEST_TIMEOUT_MS = 25000;
-const SLOW_REQUEST_NOTICE_MS = 3500;
+const REQUEST_TIMEOUT_MS = 30000;
+const SLOW_REQUEST_NOTICE_MS = 4000;
 
-function wait(ms) {
-    return new Promise(function (resolve) { setTimeout(resolve, ms); });
-}
-
-async function apiRequest(action, data = {}) {
+async function apiRequest(action, data = {}, options = {}) {
 
     const allowRetry = !NON_IDEMPOTENT_ACTIONS.has(action);
     const maxAttempts = allowRetry ? 2 : 1;
-
-    let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 
         const controller = new AbortController();
         const timeoutId = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
-
-        const slowTimer = setTimeout(function () {
-            showGlobalStatusBanner("Still loading your data — Google Sheets is taking a bit longer than usual…");
+        let slowShown = false;
+        const slowTimer = options.silent ? null : setTimeout(function () {
+            slowShown = true;
+            slowRequestStarted();
         }, SLOW_REQUEST_NOTICE_MS);
+
+        const cleanup = function () {
+            clearTimeout(timeoutId);
+            if (slowTimer) clearTimeout(slowTimer);
+            if (slowShown) slowRequestEnded();
+        };
 
         try {
 
+            // text/plain avoids a CORS pre-flight round trip to Apps Script.
             const response = await fetch(API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "text/plain;charset=utf-8" },
-                body: JSON.stringify({ action: action, ...data }),
-                signal: controller.signal
+                body: JSON.stringify(Object.assign({ action: action, token: sessionToken }, data)),
+                signal: controller.signal,
+                redirect: "follow"
             });
 
-            clearTimeout(timeoutId);
-            clearTimeout(slowTimer);
-            hideGlobalStatusBanner();
+            cleanup();
 
             if (!response.ok) throw new Error("HTTP " + response.status);
 
             const result = await response.json();
+
+            if (result && result.authError && action !== "login" && action !== "logout") {
+                handleSessionExpired();
+            }
+
             return result;
 
         }
         catch (error) {
 
-            clearTimeout(timeoutId);
-            clearTimeout(slowTimer);
-            hideGlobalStatusBanner();
+            cleanup();
 
-            lastError = error;
-
-            // Only a dropped connection / abort is safe to retry — an actual
-            // error response from the server (e.g. a thrown Error surfaced
-            // as {success:false}) already came back fine and won't change
-            // on retry, so there's no point repeating it.
             const isNetworkLevel = error.name === "AbortError" || error instanceof TypeError;
 
             if (isNetworkLevel && attempt < maxAttempts) {
-                await wait(700 * attempt);
+                await wait(600 * attempt);
                 continue;
             }
 
             console.error("API Error:", action, error);
 
             const message = error.name === "AbortError"
-                ? "The request took too long to respond. Your last action may still have saved — please check before repeating it."
-                : "Unable to connect to Google Sheets. Please check your connection and try again.";
-
-            if (!NON_IDEMPOTENT_ACTIONS.has(action) || isNetworkLevel) {
-                showNotification("Connection Issue", message);
-            } else {
-                showNotification("Connection Error", "Unable to connect to Google Sheets.");
-            }
+                ? "The server took too long to answer. Your change may still have saved — refresh before trying again."
+                : "Couldn't reach Google Sheets. Check your internet connection and try again.";
 
             return { success: false, message: message, networkError: isNetworkLevel };
 
@@ -894,86 +820,12 @@ async function apiRequest(action, data = {}) {
 
     }
 
-    return { success: false, message: (lastError && lastError.message) || "Unknown error.", networkError: true };
+    return { success: false, message: "Unknown error.", networkError: true };
 
 }
 
 /* =========================================================
-   FILTER TASKS FOR CURRENT USER
-========================================================= */
-
-function filterTasksForCurrentUser(allTasks) {
-
-    if (!currentUser) {
-        console.warn("No authenticated user found.");
-        return [];
-    }
-
-    const role = String(currentUser.role || "").trim().toLowerCase();
-    const username = String(currentUser.username || "").trim().toLowerCase();
-    const name = String(currentUser.name || "").trim().toLowerCase();
-
-    if (role === "founder") return allTasks;
-    if (role === "operations head") return allTasks;
-
-    const allowedDepartments = getAllowedDepartments();
-
-    return allTasks.filter(function(task) {
-
-        const department = String(task.department || "").trim();
-        const assignedTo = String(task.assignedTo || "").trim().toLowerCase();
-
-        if (allowedDepartments.includes(department)) return true;
-        if (assignedTo === username || assignedTo === name) return true;
-
-        return false;
-
-    });
-
-}
-
-/* =========================================================
-   GET ALLOWED DEPARTMENTS
-========================================================= */
-
-function getAllowedDepartments() {
-
-    if (!currentUser) return [];
-
-    const departments = [];
-
-    const primary = String(currentUser.primaryDepartment || "").trim();
-
-    if (primary && primary.toLowerCase() !== "all") {
-        departments.push(primary);
-    }
-
-    const coordination = String(currentUser.coordinationDepartments || "").trim();
-
-    if (coordination) {
-
-        if (coordination.toLowerCase() === "all") {
-            return DEPARTMENTS.slice();
-        }
-
-        coordination
-            .split(",")
-            .map(function(department) { return department.trim(); })
-            .filter(function(department) { return department !== ""; })
-            .forEach(function(department) {
-                if (!departments.includes(department)) departments.push(department);
-            });
-
-    }
-
-    return departments;
-
-}
-/* =========================================================
-   REQUEST GUARD + MASCOT LOADER
-   Prevents duplicate submissions (double-clicks / slow network)
-   and shows a small "Saving…" mascot while any write request
-   is in flight.
+   SAVING LOADER (small "Saving…" pill)
 ========================================================= */
 
 const activeRequests = new Set();
@@ -992,10 +844,6 @@ async function guardAsync(key, fn) {
     try {
         return await fn();
     }
-    catch (error) {
-        console.error("Guarded request failed:", key, error);
-        throw error;
-    }
     finally {
         activeRequests.delete(key);
         if (activeRequests.size === 0) hideActionLoader();
@@ -1004,25 +852,18 @@ async function guardAsync(key, fn) {
 }
 
 function showActionLoader(text) {
-
     const loader = document.getElementById("actionLoader");
     if (!loader) return;
-
-    const label = document.getElementById("actionLoaderText");
-    if (label) label.textContent = text || "Saving…";
-
+    setText("actionLoaderText", text || "Saving…");
     loader.classList.add("show");
-
 }
 
 function hideActionLoader() {
-
-    const loader = document.getElementById("actionLoader");
-    if (loader) loader.classList.remove("show");
-
+    document.getElementById("actionLoader")?.classList.remove("show");
 }
+
 /* =========================================================
-   NORMALIZE API DATA
+   LOAD ALL DATA (one request)
 ========================================================= */
 
 function normalizeTasks(data) {
@@ -1030,79 +871,121 @@ function normalizeTasks(data) {
     if (!Array.isArray(data)) return [];
 
     return data.map(function (task) {
-
         return {
-
-            taskId: task.taskId ?? task["Task ID"] ?? "",
+            taskId: String(task.taskId ?? task["Task ID"] ?? ""),
             task: task.task ?? task["Task"] ?? "",
             description: task.description ?? task["Description"] ?? "",
             department: task.department ?? task["Department"] ?? "",
             assignedTo: task.assignedTo ?? task["Assigned To"] ?? "",
             priority: task.priority ?? task["Priority"] ?? "Medium",
-            status: task.status ?? task["Status"] ?? "Open",
-            createdDate: formatDateForInput(task.createdDate ?? task["Created Date"] ?? ""),
-            dueDate: formatDateForInput(task.dueDate ?? task["Due Date"] ?? ""),
-            followupDate: formatDateForInput(task.followupDate ?? task["Follow-up Date"] ?? ""),
-            lastAction: task.lastAction ?? task["Last Action"] ?? task["Last Action / Follow-up"] ?? "",
-            remarks: task.remarks ?? task["Remarks"] ?? "",
-            updatedBy: task.updatedBy ?? task["Updated By"] ?? "",
-            updatedDate: formatDateForInput(task.updatedDate ?? task["Updated Date"] ?? "")
-
+            status: normalizeStatus(task.status ?? task["Status"] ?? "Open"),
+            createdDate: formatDateForInput(task.createdDate ?? ""),
+            dueDate: formatDateForInput(task.dueDate ?? ""),
+            followupDate: formatDateForInput(task.followupDate ?? ""),
+            lastAction: task.lastAction ?? "",
+            remarks: task.remarks ?? "",
+            updatedBy: task.updatedBy ?? "",
+            updatedDate: formatDateForInput(task.updatedDate ?? "")
         };
-
     });
 
 }
 
-/* =========================================================
-   LOAD TASKS
-========================================================= */
+function groupByTaskId(list) {
+    const map = {};
+    (list || []).forEach(function (item) {
+        const key = String(item.taskId);
+        if (!map[key]) map[key] = [];
+        map[key].push(item);
+    });
+    return map;
+}
 
-let tasksLoadFailed = false;
-let tasksEverLoaded = false;
+/* Accepts either the server's bootstrap response or the local cache. */
+function applyDataSnapshot(snapshot) {
 
-async function loadTasks() {
+    if (!snapshot) return;
 
-    // Instant paint from the last known-good data (if any) so a refresh
-    // shows something immediately instead of a blank/skeleton screen while
-    // waiting on Google Sheets.
-    if (!tasksEverLoaded) {
-        const cached = readCache("tasks");
-        if (cached && Array.isArray(cached.data)) {
-            tasks = filterTasksForCurrentUser(normalizeTasks(cached.data));
-            updateAllViews();
-            renderMyTasksOnRegularPage();
-        }
-    }
+    if (Array.isArray(snapshot.tasks)) tasks = normalizeTasks(snapshot.tasks).filter(canSeeItem);
+    if (Array.isArray(snapshot.regularTasks)) regularTasks = snapshot.regularTasks.filter(canSeeItem);
+    if (Array.isArray(snapshot.backlog)) backlogTasks = snapshot.backlog;
+    if (Array.isArray(snapshot.users)) setUsers(snapshot.users);
 
-    const result = await apiRequest("getTasks");
+    if (Array.isArray(snapshot.checklists)) allChecklists = groupByTaskId(snapshot.checklists);
+    else if (snapshot.checklists && typeof snapshot.checklists === "object") allChecklists = snapshot.checklists;
 
-    if (result && result.success) {
-        const rawTasks = result.tasks || result.data || [];
-        tasks = filterTasksForCurrentUser(normalizeTasks(rawTasks));
-        tasksLoadFailed = false;
-        tasksEverLoaded = true;
-        saveCache("tasks", rawTasks);
-    } else {
-        // Keep whatever is already on screen (fresh or cached) rather than
-        // wiping it to empty — a failed refresh shouldn't destroy good data
-        // that's already visible. The global banner communicates the failure.
-        tasksLoadFailed = true;
-    }
+    if (Array.isArray(snapshot.comments)) allComments = groupByTaskId(snapshot.comments);
+    else if (snapshot.comments && typeof snapshot.comments === "object") allComments = snapshot.comments;
 
-    updateAllViews();
-    renderMyTasksOnRegularPage();
+    populateRegularTasksDepartmentFilter();
 
 }
 
-/* ---------------------------------------------------------------------
-   Merge a single task returned by createTask/updateTask straight into
-   local state and re-render. The backend already hands back the full,
-   authoritative row, so there's no need to re-fetch and re-parse the
-   entire Master Tasks sheet just to reflect one change — this is what
-   makes saving a task feel instant instead of triggering a second
-   round trip to Google Sheets.
---------------------------------------------------------------------- */
+async function loadCoreData() {
+
+    // Don't start a second load while one is already running.
+    if (coreLoadPromise) return coreLoadPromise;
+
+    coreLoadPromise = (async function () {
+
+        const result = await apiRequest("bootstrap");
+
+        if (!currentUser) return; // logged out meanwhile
+
+        if (result && result.success) {
+
+            applyDataSnapshot(result);
+
+            dataEverLoaded = true;
+            dataLoadFailed = false;
+            lastLoadedAt = Date.now();
+            persistLocalCache();
+
+            const sectionErrors = Object.keys(result.errors || {});
+            if (sectionErrors.length) {
+                showGlobalStatusBanner("Some sections couldn't load (" + sectionErrors.join(", ") + "). The rest is up to date.",
+                    { isError: true, onRetry: loadCoreData });
+            } else {
+                const banner = document.getElementById("globalStatusBanner");
+                if (banner && banner.dataset.kind === "error") hideGlobalStatusBanner();
+            }
+
+        } else if (!result?.authError) {
+
+            dataLoadFailed = true;
+            showGlobalStatusBanner(
+                dataEverLoaded || tasks.length
+                    ? "Couldn't refresh just now — you're seeing the last saved data."
+                    : "Couldn't load your data. " + (result?.message || ""),
+                { isError: true, onRetry: loadCoreData }
+            );
+
+        }
+
+        renderCurrentPage();
+        refreshOpenDrawers();
+
+    })();
+
+    try {
+        await coreLoadPromise;
+    } finally {
+        coreLoadPromise = null;
+    }
+
+}
+
+/* Quietly refresh when someone comes back to the tab after a while. */
+function initializeBackgroundRefresh() {
+
+    document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState !== "visible" || !currentUser || !sessionToken) return;
+        if (Date.now() - lastLoadedAt > 2 * 60 * 1000) loadCoreData();
+    });
+
+}
+
+/* Put one task returned by the server into local state. */
 function upsertLocalTask(rawTask) {
 
     if (!rawTask) return;
@@ -1110,688 +993,358 @@ function upsertLocalTask(rawTask) {
     const normalized = normalizeTasks([rawTask])[0];
     if (!normalized || !normalized.taskId) return;
 
-    const index = tasks.findIndex(function(t) { return t.taskId === normalized.taskId; });
+    const index = tasks.findIndex(function (t) { return t.taskId === normalized.taskId; });
 
-    if (index !== -1) {
+    if (!canSeeItem(normalized)) {
+        if (index !== -1) tasks.splice(index, 1);
+    } else if (index !== -1) {
         tasks[index] = normalized;
-    } else if (filterTasksForCurrentUser([normalized]).length) {
+    } else {
         tasks.unshift(normalized);
     }
 
-    updateAllViews();
+    persistLocalCacheSoon();
+    renderCurrentPage();
 
 }
 
 /* =========================================================
-   ESCAPE HTML
+   OWNER PICKER (multi-select dropdown fed by the Users sheet)
 ========================================================= */
 
-function escapeHtml(value) {
+function setUsers(list) {
 
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+    // Deduplicate by display name so the dropdown doesn't list the
+    // same name twice.
+    const seen = {};
+    users = (list || [])
+        .filter(function (u) { return u && (u.name || u.username); })
+        .map(function (u) { return Object.assign({}, u, { name: String(u.name || u.username).trim() }); })
+        .filter(function (u) {
+            const key = u.name.toLowerCase();
+            if (seen[key]) { seen[key].duplicate = true; u.duplicate = true; return false; }
+            seen[key] = u;
+            return true;
+        })
+        .sort(function (a, b) { return a.name.localeCompare(b.name); });
 
-}
-
-/* =========================================================
-   LOAD REGULAR TASKS
-========================================================= */
-
-let regularTasksLoadFailed = false;
-let regularTasksEverLoaded = false;
-
-async function loadRegularTasks() {
-
-    const container = document.getElementById("regularTasksContainer");
-
-    // Instant paint from cache (first load only) instead of a skeleton,
-    // so a refresh shows the last known list right away.
-    if (!regularTasksEverLoaded) {
-
-        const cached = readCache("regularTasks");
-
-        if (cached && Array.isArray(cached.data) && cached.data.length) {
-            regularTasks = cached.data;
-            populateRegularTasksDepartmentFilter();
-            renderRegularTasks();
-        } else if (container) {
-            container.innerHTML = `<div class="skeleton-card-grid">${skeletonCards(4)}</div>`;
-        }
-
-    }
-
-    try {
-
-        // Routed through apiRequest (instead of a bare fetch) so this gets
-        // the same timeout + automatic retry on dropped connections as
-        // every other read.
-        const result = await apiRequest("getRegularTasks");
-
-        if (!result || !result.success) {
-
-            regularTasksLoadFailed = true;
-
-            // Only replace the view with a hard error if we have nothing
-            // at all to show — otherwise keep the last good list on screen
-            // and let the global banner communicate the failed refresh.
-            if (!regularTasks.length && container) {
-                container.innerHTML = `
-                    <div class="load-error-state">
-                        <p>Unable to load regular tasks${result?.message ? ": " + escapeHtml(result.message) : "."}</p>
-                        <button type="button" class="load-error-retry-button" onclick="loadRegularTasks()">Retry</button>
-                    </div>
-                `;
-            }
-
-            return;
-
-        }
-
-        regularTasksLoadFailed = false;
-        regularTasksEverLoaded = true;
-        regularTasks = Array.isArray(result.regularTasks) ? result.regularTasks : [];
-        saveCache("regularTasks", regularTasks);
-
-        populateRegularTasksDepartmentFilter();
-        renderRegularTasks();
-
-    }
-    catch (error) {
-
-        console.error("REGULAR TASKS ERROR:", error);
-
-        regularTasksLoadFailed = true;
-
-        if (!regularTasks.length && container) {
-            container.innerHTML = `
-                <div class="load-error-state">
-                    <p>Unable to load regular tasks. Please check your connection.</p>
-                    <button type="button" class="load-error-retry-button" onclick="loadRegularTasks()">Retry</button>
-                </div>
-            `;
-        }
-
-    }
+    if (taskOwnerPicker) taskOwnerPicker.refresh();
+    if (taskDetailOwnerPicker) taskDetailOwnerPicker.refresh();
 
 }
 
-/* =========================================================
-   REGULAR TASKS — DEPARTMENT SCOPE FILTER
-   Default view scopes Regular Tasks to the logged-in user's
-   primary department only ("My Department"), matching how All
-   Tasks / Book Fair keep a person's own area front and center.
-   Other departments are only shown once picked from the dropdown
-   (or "All Departments" is chosen). Within whatever scope is
-   selected, cards still order Mine → Primary Department → Others
-   (see orderByRelevance / buildRelevanceSections), exactly like
-   the All Tasks page — so a person's own assigned tasks always
-   surface first.
-========================================================= */
-
-let regularTasksFilterDefaulted = false;
-
-function populateRegularTasksDepartmentFilter() {
-
-    const select = document.getElementById("regularTasksDepartmentFilter");
-    if (!select) return;
-
-    const previousValue = select.value;
-
-    const departmentsInData = Array.from(
-        new Set(
-            regularTasks
-                .map(function(t) { return String(t.department || "").trim(); })
-                .filter(function(d) { return d !== ""; })
-        )
-    ).sort();
-
-    select.innerHTML =
-        `<option value="__mine__">My Department</option>` +
-        `<option value="">All Departments</option>` +
-        departmentsInData.map(function(department) {
-            return `<option value="${escapeHtml(department)}">${escapeHtml(department)}</option>`;
-        }).join("");
-
-    if (!regularTasksFilterDefaulted) {
-
-        const primaryDepartment = String(currentUser?.primaryDepartment || "").trim();
-        select.value = (primaryDepartment && primaryDepartment.toLowerCase() !== "all") ? "__mine__" : "";
-        regularTasksFilterDefaulted = true;
-
-    } else if (previousValue) {
-
-        select.value = previousValue;
-
-    }
-
+/* Maps a stored name like "Tarun" to the Users-sheet name "Mr.Tarun".
+   Returns null if no unique match is found. */
+function canonicalUserName(token) {
+    const matches = users.filter(function (u) { return ownerMatchesUser(token, u); });
+    return matches.length === 1 ? matches[0].name : null;
 }
 
-function initializeRegularTasksFilter() {
-
-    const select = document.getElementById("regularTasksDepartmentFilter");
-    if (select) {
-        select.addEventListener("change", renderRegularTasks);
-    }
-
-}
-
-/* =========================================================
-   RENDER REGULAR TASKS
-========================================================= */
-
-function renderRegularTasks() {
-
-    const container = document.getElementById("regularTasksContainer");
-
-    if (!container) {
-        console.warn("Regular Tasks container not found.");
-        return;
-    }
-
-    if (!Array.isArray(regularTasks) || regularTasks.length === 0) {
-        container.innerHTML = `<div class="regular-tasks-empty">No regular tasks found.</div>`;
-        return;
-    }
-
-    /* Scope to the selected department before anything else. "__mine__"
-       (the default) scopes to the logged-in user's primary department;
-       "" shows every department; anything else is an explicit department
-       name picked from the dropdown. */
-    const filterValue = document.getElementById("regularTasksDepartmentFilter")?.value ?? "__mine__";
-    const primaryDepartment = String(currentUser?.primaryDepartment || "").trim();
-    const hasPrimaryDepartment = primaryDepartment && primaryDepartment.toLowerCase() !== "all";
-
-    let scoped = regularTasks;
-
-    if (filterValue === "__mine__") {
-        if (hasPrimaryDepartment) {
-            scoped = regularTasks.filter(function(t) { return String(t.department || "").trim() === primaryDepartment; });
-        }
-        // no primary department on file (e.g. Founder) — "My Department" has nothing to scope to, show everything
-    } else if (filterValue) {
-        scoped = regularTasks.filter(function(t) { return String(t.department || "").trim() === filterValue; });
-    }
-
-    if (!scoped.length) {
-        const scopeLabel = filterValue === "__mine__" ? "your department" : (filterValue ? escapeHtml(filterValue) : "");
-        container.innerHTML = `<div class="regular-tasks-empty">No regular tasks for ${scopeLabel || "this view"} yet.</div>`;
-        return;
-    }
-
-    const groups = {};
-
-    scoped.forEach(function(task) {
-
-        const frequency = String(task.expectedTime || "Other").trim().toLowerCase();
-
-        let groupName = "Other";
-
-        if (frequency === "daily") groupName = "Daily";
-        else if (frequency === "weekly") groupName = "Weekly";
-        else if (frequency === "twice a week" || frequency === "twice-a-week" || frequency === "twice_a_week") groupName = "Twice a Week";
-        else if (frequency === "monthly") groupName = "Monthly";
-
-        if (!groups[groupName]) groups[groupName] = [];
-
-        groups[groupName].push(task);
-
-    });
-
-    const displayOrder = ["Daily", "Weekly", "Twice a Week", "Monthly", "Other"];
-
-    let html = "";
-
-    displayOrder.forEach(function(groupName) {
-
-        const group = groups[groupName];
-
-        if (!group || group.length === 0) return;
-
-        html += `
-            <div class="regular-task-group">
-                <div class="regular-task-group-header">
-                    <h2>${escapeHtml(groupName)}</h2>
-                    <span>${group.length} task${group.length === 1 ? "" : "s"}</span>
-                </div>
-                <div class="regular-task-list">
-        `;
-
-        /* Mine → Primary Department → Others, same as All Tasks / Book Fair
-           (see buildRelevanceSections). With the department scope already
-           narrowed above, this mainly surfaces the current user's own
-           assigned tasks first within that scope. */
-        const orderedGroup = orderByRelevance(group, { dateField: "expectedDate" });
-
-        orderedGroup.forEach(function(task) {
-            html += createRegularTaskCard(task);
-        });
-
-        html += `</div></div>`;
-
-    });
-
-    container.innerHTML = html;
-
-}
-
-/* =========================================================
-   MY TASKS (shown above Regular Tasks)
-   Pulls from the Master Tasks list (`tasks`, already scoped by
-   filterTasksForCurrentUser) rather than the Regular Tasks sheet,
-   since "My Tasks" here means the person's own assigned work
-   across all departments, not the recurring checklist below it.
-========================================================= */
-
-function renderMyTasksOnRegularPage() {
-
-    const container = document.getElementById("myTasksOnRegularPage");
-    if (!container) return;
-
-    if (regularTasksLoadFailed && !regularTasks.length) {
-        container.innerHTML = `
-            <div class="load-error-state">
-                <p>Unable to load your regular tasks.</p>
-                <button type="button" class="load-error-retry-button" onclick="loadRegularTasks()">Retry</button>
-            </div>
-        `;
-        return;
-    }
-
-    if (!currentUser) {
-        container.innerHTML = `<div class="my-tasks-empty">Sign in to see your regular tasks.</div>`;
-        return;
-    }
-
-    const mine = regularTasks
-        .filter(function (task) { return currentUserMatches(task.assignedTo); })
-        .sort(makeDateThenPriorityComparator("expectedDate"));
-
-    if (!mine.length) {
-        container.innerHTML = `<div class="my-tasks-empty">No regular tasks are assigned to you right now.</div>`;
-        return;
-    }
-
-    container.innerHTML = mine.map(function (task) {
-
-        const id = String(task.regularTaskId || "").trim();
-        const expectedDate = String(task.expectedDate || "").trim();
-        const dueSoon = isDueSoon(task, "expectedDate");
-
-        return `
-            <div class="my-task-row row-clickable" data-id="${escapeHtml(id)}">
-                <div class="my-task-row-main">
-                    <strong>${escapeHtml(task.task)}</strong>
-                    <span>${escapeHtml(task.department || "-")} · ${escapeHtml(id)}</span>
-                </div>
-                <div class="my-task-row-meta">
-                    ${priorityBadge(task.priority)}
-                    ${task.expectedTime ? `<span>${escapeHtml(task.expectedTime)}</span>` : ""}
-                    ${expectedDate
-                        ? `<span>Expected ${escapeHtml(displayDate(expectedDate))}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</span>`
-                        : ""}
-                </div>
-            </div>
-        `;
-
-    }).join("");
-
-}
-
-let myTasksOnRegularPageDelegationReady = false;
-
-function initializeMyTasksOnRegularPageDelegation() {
-
-    if (myTasksOnRegularPageDelegationReady) return;
-
-    const container = document.getElementById("myTasksOnRegularPage");
-    if (!container) return;
-
-    container.addEventListener("click", function (event) {
-
-        const row = event.target.closest(".row-clickable");
-        if (row && row.dataset.id) {
-            openRegularTaskUpdate(row.dataset.id);
-        }
-
-    });
-
-    myTasksOnRegularPageDelegationReady = true;
-
-}
-
-/* =========================================================
-   OPEN / CLOSE REGULAR TASK UPDATE
-========================================================= */
-
-function openRegularTaskUpdate(regularTaskId) {
-
-    const task = regularTasks.find(function(item) {
-        return String(item.regularTaskId || "").trim() === String(regularTaskId || "").trim();
-    });
-
-    if (!task) {
-        showNotification("Error", "Regular task could not be found.");
-        return;
-    }
-
-    const modal = document.getElementById("regularTaskUpdateModal");
-
-    if (!modal) {
-        console.error("Regular Task Update modal not found.");
-        return;
-    }
-
-    const taskName = document.getElementById("regularTaskUpdateTaskName");
-    const taskId = document.getElementById("regularTaskUpdateTaskId");
-    const department = document.getElementById("regularTaskUpdateDepartment");
-    const expectedTime = document.getElementById("regularTaskUpdateExpectedTime");
-
-    if (taskName) taskName.textContent = task.task || "Regular Task";
-    if (taskId) taskId.textContent = task.regularTaskId || "-";
-    if (department) department.textContent = task.department || "-";
-    if (expectedTime) expectedTime.textContent = task.expectedTime || "-";
-
-    const form = document.getElementById("regularTaskUpdateForm");
-    if (form) form.dataset.regularTaskId = task.regularTaskId || "";
-
-    const status = document.getElementById("regularTaskStatus");
-    const description = document.getElementById("regularTaskDescription");
-    const error = document.getElementById("regularTaskUpdateError");
-
-    if (status) status.value = "";
-    if (description) description.value = "";
-
-    if (error) {
-        error.textContent = "";
-        error.style.display = "none";
-    }
-
-    modal.style.display = "flex";
-    document.body.classList.add("modal-open");
-
-}
-
-function closeRegularTaskUpdate() {
-
-    const modal = document.getElementById("regularTaskUpdateModal");
-    if (modal) modal.style.display = "none";
-
-    document.body.classList.remove("modal-open");
-
-}
-
-/* =========================================================
-   INITIALIZE REGULAR TASK UPDATE FORM
-========================================================= */
-
-function initializeRegularTaskUpdateForm() {
-
-    const form = document.getElementById("regularTaskUpdateForm");
-    if (!form) return;
-
-    if (form.dataset.initialized === "true") return;
-    form.dataset.initialized = "true";
-
-       form.addEventListener("submit", async function(event) {
-
-        event.preventDefault();
-
-        const regularTaskId = String(form.dataset.regularTaskId || "").trim();
-        const status = document.getElementById("regularTaskStatus")?.value || "";
-        const description = document.getElementById("regularTaskDescription")?.value.trim() || "";
-        const error = document.getElementById("regularTaskUpdateError");
-
-        if (!regularTaskId) {
-            if (error) { error.textContent = "Regular Task ID is missing."; error.style.display = "block"; }
-            return;
-        }
-
-        if (status !== "Completed" && status !== "Pending") {
-            if (error) { error.textContent = "Please select Completed or Pending."; error.style.display = "block"; }
-            return;
-        }
-
-        if (!description) {
-            if (error) { error.textContent = "Please enter a description."; error.style.display = "block"; }
-            return;
-        }
-
-        const guardKey = "regularTaskUpdate-" + regularTaskId;
-        if (isRequestActive(guardKey)) return;
-
-        const button = document.getElementById("saveRegularTaskUpdateButton");
-        if (button) { button.disabled = true; button.textContent = "Saving..."; }
-
-        try {
-
-            await guardAsync(guardKey, async function() {
-
-                const result = await apiRequest("saveRegularTaskUpdate", {
-                    regularTaskId: regularTaskId,
-                    status: status,
-                    description: description,
-                    updatedBy: currentUser?.username || currentUser?.name || "Website"
-                });
-
-                if (!result || !result.success) {
-                    throw new Error(result?.message || "Unable to save update.");
-                }
-
-            });
-
-            closeRegularTaskUpdate();
-            showNotification("Updated", "Regular task update saved successfully.");
-
-        }
-        catch (submitError) {
-
-            console.error("Regular task update error:", submitError);
-
-            if (error) {
-                error.textContent = submitError.message || "Unable to save update.";
-                error.style.display = "block";
-            }
-
-        }
-        finally {
-
-            if (button) {
-                button.disabled = false;
-                button.textContent = "Save Update";
-            }
-
-        }
-
-    });
-
-}
-
-/* =========================================================
-   CREATE REGULAR TASK CARD
-========================================================= */
-
-function createRegularTaskCard(task) {
-
-    const id = String(task.regularTaskId || "").trim();
-    const department = String(task.department || "").trim();
-    const taskName = String(task.task || "").trim();
-    const assignedTo = String(task.assignedTo || "").trim();
-    const priority = String(task.priority || "").trim();
-    const expectedTime = String(task.expectedTime || "").trim();
-    const expectedDate = String(task.expectedDate || "").trim();
-    const dueSoon = isDueSoon(task, "expectedDate");
-
-    return `
-        <div class="regular-task-card${dueSoon ? " card-due-soon" : ""}" data-regular-task-id="${escapeHtml(id)}">
-            <div class="regular-task-card-main">
-                <div class="regular-task-id">${escapeHtml(id)}</div>
-                <h3>${escapeHtml(taskName)}</h3>
-                <div class="regular-task-details">
-                    ${department ? `<span>Department: ${escapeHtml(department)}</span>` : ""}
-                    ${assignedTo ? `<span>Assigned To: ${escapeHtml(assignedTo)}</span>` : ""}
-                    ${priority ? `<span>Priority: ${escapeHtml(priority)}</span>` : ""}
-                    ${expectedTime ? `<span>Expected: ${escapeHtml(expectedTime)}</span>` : ""}
-                    ${expectedDate ? `<span>Expected Date: ${escapeHtml(displayDate(expectedDate))}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</span>` : ""}
-                </div>
-            </div>
-            <div class="regular-task-card-actions">
-                <button type="button" class="regular-task-checklist-button" data-regular-task-id="${escapeHtml(id)}">
-                    ${checklistStatusDot("regular:" + id)} Checklist
-                </button>
-                <button type="button" class="regular-task-update-button" onclick="openRegularTaskUpdate('${escapeHtml(id)}')">Update</button>
+function createOwnerPicker(root) {
+
+    if (!root) return null;
+
+    root.innerHTML = `
+        <button type="button" class="owner-picker-trigger" aria-haspopup="listbox" aria-expanded="false">
+            <span class="owner-picker-chips"></span>
+            <span class="owner-picker-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="owner-picker-menu" hidden>
+            <input type="search" class="owner-picker-search" placeholder="Search people…" aria-label="Search people">
+            <div class="owner-picker-options" role="listbox" aria-multiselectable="true"></div>
+            <div class="owner-picker-footer">
+                <button type="button" class="owner-picker-clear">Clear</button>
+                <button type="button" class="owner-picker-done">Done</button>
             </div>
         </div>
     `;
 
+    const trigger = root.querySelector(".owner-picker-trigger");
+    const chips = root.querySelector(".owner-picker-chips");
+    const menu = root.querySelector(".owner-picker-menu");
+    const search = root.querySelector(".owner-picker-search");
+    const optionsBox = root.querySelector(".owner-picker-options");
+
+    let selected = [];      // display names, in pick order
+    let disabled = false;
+
+    function renderChips() {
+        if (!selected.length) {
+            chips.innerHTML = `<span class="owner-picker-placeholder">${disabled ? "Unassigned" : "Select owners"}</span>`;
+            return;
+        }
+        chips.innerHTML = selected.map(function (name) {
+            const known = users.some(function (u) { return u.name === name; });
+            return `<span class="owner-chip${known ? "" : " owner-chip-unknown"}" title="${known ? "" : "Not in the Users sheet"}">${escapeHtml(name)}</span>`;
+        }).join("");
+    }
+
+    function renderOptions() {
+
+        const query = normalizePersonName(search.value);
+        const names = users.map(function (u) { return u.name; });
+
+        // Keep old names that aren't in the Users sheet visible so they can be removed.
+        selected.forEach(function (name) { if (names.indexOf(name) === -1) names.push(name); });
+
+        const visible = names.filter(function (name) { return !query || normalizePersonName(name).indexOf(query) !== -1; });
+
+        if (!users.length) {
+            optionsBox.innerHTML = `<div class="owner-picker-empty">No people found. Add them to the Users sheet (with Status "Active").</div>`;
+            return;
+        }
+
+        if (!visible.length) {
+            optionsBox.innerHTML = `<div class="owner-picker-empty">No one matches "${escapeHtml(search.value)}".</div>`;
+            return;
+        }
+
+        optionsBox.innerHTML = visible.map(function (name) {
+            const user = users.find(function (u) { return u.name === name; });
+            const checked = selected.indexOf(name) !== -1;
+            const hint = user
+                ? (user.primaryDepartment && user.primaryDepartment.toLowerCase() !== "all" ? user.primaryDepartment : user.role || "")
+                : "Not in Users sheet";
+            return `
+                <label class="owner-picker-option${checked ? " is-checked" : ""}" role="option" aria-selected="${checked}">
+                    <input type="checkbox" value="${escapeHtml(name)}" ${checked ? "checked" : ""}>
+                    <span class="owner-picker-option-name">${escapeHtml(name)}</span>
+                    <span class="owner-picker-option-hint">${escapeHtml(hint)}</span>
+                </label>
+            `;
+        }).join("");
+
+    }
+
+    function open() {
+        if (disabled) return;
+        document.querySelectorAll(".owner-picker.is-open").forEach(function (other) {
+            if (other !== root && other._picker) other._picker.close();
+        });
+        menu.hidden = false;
+        root.classList.add("is-open");
+        trigger.setAttribute("aria-expanded", "true");
+        search.value = "";
+        renderOptions();
+        setTimeout(function () { search.focus(); }, 0);
+    }
+
+    function close() {
+        menu.hidden = true;
+        root.classList.remove("is-open");
+        trigger.setAttribute("aria-expanded", "false");
+    }
+
+    trigger.addEventListener("click", function () {
+        if (root.classList.contains("is-open")) close(); else open();
+    });
+
+    search.addEventListener("input", renderOptions);
+
+    search.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") { event.stopPropagation(); close(); trigger.focus(); }
+        if (event.key === "Enter") {
+            event.preventDefault();
+            const first = optionsBox.querySelector("input[type='checkbox']");
+            if (first) { first.checked = !first.checked; first.dispatchEvent(new Event("change", { bubbles: true })); }
+        }
+    });
+
+    optionsBox.addEventListener("change", function (event) {
+        const box = event.target;
+        if (!box || box.type !== "checkbox") return;
+        const name = box.value;
+        if (box.checked) { if (selected.indexOf(name) === -1) selected.push(name); }
+        else selected = selected.filter(function (n) { return n !== name; });
+        renderChips();
+        renderOptions();
+        root.dispatchEvent(new CustomEvent("ownerschange", { bubbles: true }));
+    });
+
+    root.querySelector(".owner-picker-clear").addEventListener("click", function () {
+        selected = [];
+        renderChips();
+        renderOptions();
+        root.dispatchEvent(new CustomEvent("ownerschange", { bubbles: true }));
+    });
+
+    root.querySelector(".owner-picker-done").addEventListener("click", function () { close(); trigger.focus(); });
+
+    document.addEventListener("mousedown", function (event) {
+        if (root.classList.contains("is-open") && !root.contains(event.target)) close();
+    });
+
+    const api = {
+        getValue: function () { return joinOwners(selected); },
+        getList: function () { return selected.slice(); },
+        setValue: function (value) {
+            // Map old spellings ("Tarun", "bhuvana") onto the Users-sheet names.
+            const out = [];
+            splitOwners(value).forEach(function (token) {
+                const name = canonicalUserName(token) || token;
+                if (out.indexOf(name) === -1) out.push(name);
+            });
+            selected = out;
+            renderChips();
+            if (!menu.hidden) renderOptions();
+        },
+        setDisabled: function (value) {
+            disabled = !!value;
+            trigger.disabled = disabled;
+            root.classList.toggle("is-disabled", disabled);
+            if (disabled) close();
+            renderChips();
+        },
+        refresh: function () {
+            api.setValue(api.getValue());
+        },
+        close: close
+    };
+
+    root._picker = api;
+    renderChips();
+    return api;
+
+}
+
+function initializeOwnerPickers() {
+    taskOwnerPicker = createOwnerPicker(document.getElementById("taskOwnerPicker"));
+    taskDetailOwnerPicker = createOwnerPicker(document.getElementById("taskDetailOwnerPicker"));
 }
 
 /* =========================================================
-   REGULAR TASK CHECKLIST DRAWER
-   Same generic checklist plumbing used by the Task Detail drawer
-   and Book Fair cards (renderChecklistInto / Task Checklists
-   sheet), keyed on "regular:<regularTaskId>" so every add/toggle
-   is written to the same spreadsheet-backed endpoint and persists
-   like any other checklist item.
+   SECTIONS: MY TASKS → OTHERS IN MY DEPARTMENT (collapsible)
 ========================================================= */
 
-let regularTaskChecklistCurrentId = "";
+const PRIORITY_SORT_ORDER = { high: 0, medium: 1, low: 2 };
 
-let regularTasksDelegationReady = false;
+function makeDateThenPriorityComparator(dateField) {
 
-function initializeRegularTasksDelegation() {
+    return function (a, b) {
 
-    if (regularTasksDelegationReady) return;
+        const dateA = parseDate(a[dateField]);
+        const dateB = parseDate(b[dateField]);
 
-    const container = document.getElementById("regularTasksContainer");
-    if (!container) return;
+        if (dateA && dateB) {
+            const diff = dateA.getTime() - dateB.getTime();
+            if (diff !== 0) return diff;
+        } else if (dateA && !dateB) {
+            return -1;
+        } else if (!dateA && dateB) {
+            return 1;
+        }
 
-    container.addEventListener("click", function(event) {
+        const pa = PRIORITY_SORT_ORDER[String(a.priority || "").toLowerCase()] ?? 99;
+        const pb = PRIORITY_SORT_ORDER[String(b.priority || "").toLowerCase()] ?? 99;
+        return pa - pb;
 
-        const button = event.target.closest(".regular-task-checklist-button");
-        if (!button) return;
+    };
 
-        openRegularTaskChecklistDrawer(button.dataset.regularTaskId);
+}
 
+/* Completed items sink to the bottom of each section. */
+function makeSectionComparator(dateField) {
+    const byDate = makeDateThenPriorityComparator(dateField);
+    return function (a, b) {
+        const ca = String(a.status || "").toLowerCase() === "completed" ? 1 : 0;
+        const cb = String(b.status || "").toLowerCase() === "completed" ? 1 : 0;
+        if (ca !== cb) return ca - cb;
+        return byDate(a, b);
+    };
+}
+
+/* Returns [{ key, title, items, collapsible, emptyText }].
+   Admins: "My Tasks" + "All Other Tasks" (both open).
+   Everyone else: "My Tasks" + "Others in <primary dept>" (collapsed). */
+function buildSections(items, options = {}) {
+
+    const comparator = makeSectionComparator(options.dateField || "dueDate");
+    const mine = [];
+    const others = [];
+
+    items.forEach(function (item) {
+        if (currentUserMatches(item.assignedTo)) mine.push(item);
+        else others.push(item);
     });
 
-    regularTasksDelegationReady = true;
+    mine.sort(comparator);
+    others.sort(comparator);
 
-}
+    const sections = [];
+    const privileged = isPrivilegedUser();
 
-function initializeRegularTaskChecklistDrawer() {
-
-    const form = document.getElementById("regularTaskChecklistForm");
-
-    // form itself is wired lazily by renderChecklistInto() the first time
-    // the drawer opens (it checks formElement.dataset.wired), so nothing
-    // else to set up here beyond making sure the element exists.
-    if (!form) {
-        console.warn("Regular Task Checklist form not found.");
-    }
-
-}
-
-function refreshRegularTaskChecklistDrawer() {
-
-    if (!regularTaskChecklistCurrentId) return;
-
-    const entityKey = "regular:" + regularTaskChecklistCurrentId;
-
-    const list = document.getElementById("regularTaskChecklistList");
-    const form = document.getElementById("regularTaskChecklistForm");
-    const input = document.getElementById("regularTaskChecklistInput");
-    const progress = document.getElementById("regularTaskChecklistProgress");
-
-    renderChecklistInto(entityKey, list, form, input, true, isPrivilegedUser(), refreshRegularTaskChecklistDrawer);
-    updateChecklistProgressLabel(entityKey, progress);
-
-    renderRegularTasks();
-
-}
-
-function openRegularTaskChecklistDrawer(regularTaskId) {
-
-    const task = regularTasks.find(function(item) {
-        return String(item.regularTaskId || "").trim() === String(regularTaskId || "").trim();
+    sections.push({
+        key: "mine",
+        title: "My Tasks",
+        items: mine,
+        collapsible: false,
+        emptyText: options.mineEmptyText || "Nothing is assigned to you here."
     });
 
-    if (!task) {
-        showNotification("Error", "Regular task could not be found.");
-        return;
+    if (privileged) {
+        if (others.length) {
+            sections.push({ key: "others", title: "All Other Tasks", items: others, collapsible: false });
+        }
+    } else if (others.length) {
+        const primary = primaryDepartment();
+        sections.push({
+            key: "others",
+            title: primary ? `Others in ${primary}` : "Other tasks",
+            items: others,
+            collapsible: true
+        });
     }
 
-    regularTaskChecklistCurrentId = task.regularTaskId;
-
-    setText("regularTaskChecklistTitle", task.task || "Regular Task");
-    setText("regularTaskChecklistDepartment", task.department || "-");
-    setText("regularTaskChecklistExpectedTime", task.expectedTime || "-");
-
-    refreshRegularTaskChecklistDrawer();
-
-    const drawer = document.getElementById("regularTaskChecklistDrawer");
-    if (drawer) drawer.style.display = "block";
-    document.body.classList.add("modal-open");
+    return sections;
 
 }
 
-function closeRegularTaskChecklistDrawer() {
-
-    const drawer = document.getElementById("regularTaskChecklistDrawer");
-    if (drawer) drawer.style.display = "none";
-
-    document.body.classList.remove("modal-open");
-    regularTaskChecklistCurrentId = "";
-
+function isSectionExpanded(pageKey, section) {
+    if (!section.collapsible) return true;
+    return !!expandedSections[pageKey + ":" + section.key];
 }
 
-/* =========================================================
-   UPDATE ALL VIEWS
-========================================================= */
+function toggleSection(pageKey, sectionKey) {
+    const key = pageKey + ":" + sectionKey;
+    expandedSections[key] = !expandedSections[key];
+    renderCurrentPage();
+}
 
-function updateAllViews() {
-
-    updateDashboard();
-    renderTasksTable();
-    renderFollowups();
-    renderActivity();
-    renderDepartmentCards();
-
+function sectionToggleButton(pageKey, section, expanded) {
+    return `
+        <button type="button" class="section-toggle" data-page-key="${escapeHtml(pageKey)}" data-section-key="${escapeHtml(section.key)}" aria-expanded="${expanded}">
+            <span class="section-toggle-caret" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+            ${expanded ? "Hide" : "Show"} ${section.items.length} task${section.items.length === 1 ? "" : "s"}
+        </button>
+    `;
 }
 
 /* =========================================================
    DASHBOARD
 ========================================================= */
 
+function countStatus(list, status) {
+    return list.filter(function (t) { return t.status === status; }).length;
+}
+
 function updateDashboard() {
 
-    const total = tasks.length;
-    const open = tasks.filter(function(t) { return t.status === "Open"; }).length;
-    const progress = tasks.filter(function(t) { return t.status === "In Progress"; }).length;
-    const blocked = tasks.filter(function(t) { return t.status === "Blocked"; }).length;
-    const completed = tasks.filter(function(t) { return t.status === "Completed"; }).length;
-    const overdue = tasks.filter(isOverdue).length;
+    animateNumber("totalTasks", tasks.length);
+    animateNumber("openTasks", countStatus(tasks, "Open"));
+    animateNumber("progressTasks", countStatus(tasks, "In Progress"));
+    animateNumber("onHoldTasks", countStatus(tasks, STATUS_ON_HOLD));
+    animateNumber("completedTasks", countStatus(tasks, "Completed"));
+    animateNumber("overdueTasks", tasks.filter(isOverdue).length);
 
-    animateNumber("totalTasks", total);
-    animateNumber("openTasks", open);
-    animateNumber("progressTasks", progress);
-    animateNumber("blockedTasks", blocked);
-    animateNumber("completedTasks", completed);
-    animateNumber("overdueTasks", overdue);
-
-    animateNumber("highPriorityCount", tasks.filter(function(t) { return t.priority === "High"; }).length);
-    animateNumber("mediumPriorityCount", tasks.filter(function(t) { return t.priority === "Medium"; }).length);
-    animateNumber("lowPriorityCount", tasks.filter(function(t) { return t.priority === "Low"; }).length);
+    animateNumber("highPriorityCount", tasks.filter(function (t) { return t.priority === "High"; }).length);
+    animateNumber("mediumPriorityCount", tasks.filter(function (t) { return t.priority === "Medium"; }).length);
+    animateNumber("lowPriorityCount", tasks.filter(function (t) { return t.priority === "Low"; }).length);
 
     updateFollowupSummary();
     renderRecentTasks();
 
 }
 
-/* count-up animation for KPI / summary numbers (purely cosmetic) */
 function animateNumber(id, value) {
 
     const element = document.getElementById(id);
@@ -1800,71 +1353,56 @@ function animateNumber(id, value) {
     const target = Number(value) || 0;
     const start = Number(element.textContent) || 0;
 
-    if (start === target) {
+    if (start === target || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         element.textContent = target;
         return;
     }
 
-    const duration = 500;
+    const duration = 450;
     const startTime = performance.now();
 
     function tick(now) {
-
         const progress = Math.min(1, (now - startTime) / duration);
         const eased = 1 - Math.pow(1 - progress, 3);
-        const current = Math.round(start + (target - start) * eased);
-
-        element.textContent = current;
-
-        if (progress < 1) {
-            requestAnimationFrame(tick);
-        } else {
-            element.textContent = target;
-        }
-
+        element.textContent = Math.round(start + (target - start) * eased);
+        if (progress < 1) requestAnimationFrame(tick);
+        else element.textContent = target;
     }
 
     requestAnimationFrame(tick);
 
 }
 
-/* =========================================================
-   RECENT TASKS
-========================================================= */
-
 function renderRecentTasks() {
 
     const tbody = document.getElementById("recentTasksTable");
     if (!tbody) return;
 
-    tbody.innerHTML = "";
-
-    const recent = [...tasks]
-        .sort(function(a, b) { return String(b.updatedDate).localeCompare(String(a.updatedDate)); })
+    const recent = tasks.slice()
+        .sort(function (a, b) { return String(b.updatedDate).localeCompare(String(a.updatedDate)); })
         .slice(0, 10);
 
+    tbody.innerHTML = "";
+
     if (!recent.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-table">No tasks available.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-table">${dataEverLoaded ? "No tasks yet." : "Loading tasks…"}</td></tr>`;
         return;
     }
 
-    batchRows(tbody, recent, function(task) {
-
+    batchRows(tbody, recent, function (task) {
         const row = document.createElement("tr");
-        if (isDueSoon(task)) row.className = "row-due-soon";
-
+        row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "");
+        row.dataset.id = task.taskId;
         row.innerHTML = `
-            <td>${escapeHTML(task.taskId)}</td>
-            <td>${escapeHTML(task.task)}</td>
-            <td>${escapeHTML(task.department)}</td>
-            <td>${escapeHTML(task.assignedTo)}</td>
+            <td>${escapeHtml(task.taskId)}</td>
+            <td>${escapeHtml(task.task)}</td>
+            <td>${escapeHtml(task.department)}</td>
+            <td class="owners-cell">${ownersDisplay(task.assignedTo)}</td>
             <td>${priorityBadge(task.priority)}</td>
             <td>${statusBadge(task.status, task)}</td>
             <td>${dueDateWithChip(task)}</td>
         `;
-
         return row;
-
     });
 
 }
@@ -1873,30 +1411,87 @@ function renderRecentTasks() {
    ALL TASKS
 ========================================================= */
 
-/* ---------------------------------------------------------------------
-   Builds one <tr> for the All Tasks table. Extracted so both the flat
-   (filtered/searched) view and the grouped-sections view render rows
-   identically.
---------------------------------------------------------------------- */
-function buildAllTasksRow(task) {
+function buildTaskRow(task, options = {}) {
 
     const row = document.createElement("tr");
-    row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "");
+    row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "") + (options.extraClass ? " " + options.extraClass : "");
     row.dataset.id = task.taskId;
 
+    const actionCell = isPrivilegedUser()
+        ? `<button type="button" class="table-action edit-task" data-id="${escapeHtml(task.taskId)}">Edit</button>`
+        : `<span class="table-action-view">View</span>`;
+
+    if (options.variant === "department") {
+        row.innerHTML = `
+            <td>${escapeHtml(task.taskId)}</td>
+            <td>${escapeHtml(task.task)}</td>
+            <td class="owners-cell">${ownersDisplay(task.assignedTo)}</td>
+            <td>${priorityBadge(task.priority)}</td>
+            <td>${statusBadge(task.status, task)}</td>
+            <td>${dueDateWithChip(task)}</td>
+            <td>${displayDate(task.followupDate)}</td>
+            <td class="checklist-cell">${checklistStatusDot(task.taskId)}</td>
+            <td>${actionCell}</td>
+        `;
+        return row;
+    }
+
     row.innerHTML = `
-        <td>${escapeHTML(task.taskId)}</td>
-        <td><strong>${escapeHTML(task.task)}</strong></td>
-        <td>${escapeHTML(task.department)}</td>
-        <td>${escapeHTML(task.assignedTo)}</td>
+        <td>${escapeHtml(task.taskId)}</td>
+        <td><strong>${escapeHtml(task.task)}</strong></td>
+        <td>${escapeHtml(task.department)}</td>
+        <td class="owners-cell">${ownersDisplay(task.assignedTo)}</td>
         <td>${priorityBadge(task.priority)}</td>
         <td>${statusBadge(task.status, task)}</td>
         <td>${dueDateWithChip(task)}</td>
-        <td class="checklist-cell">${checklistStatusDot("task:" + task.taskId)}</td>
-        <td>${isPrivilegedUser() ? `<button class="table-action edit-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
+        <td class="checklist-cell">${checklistStatusDot(task.taskId)}</td>
+        <td>${actionCell}</td>
     `;
 
     return row;
+
+}
+
+function renderSectionedTable(tbody, items, pageKey, colspan, rowOptions, forceExpand) {
+
+    const sections = buildSections(items, rowOptions.sectionOptions || {});
+    const fragment = document.createDocumentFragment();
+
+    sections.forEach(function (section) {
+
+        const expanded = forceExpand || isSectionExpanded(pageKey, section);
+
+        const header = document.createElement("tr");
+        header.className = "table-section-row" + (section.collapsible ? " table-section-row-collapsible" : "");
+        header.innerHTML = `
+            <td colspan="${colspan}">
+                <div class="table-section-header">
+                    <span>${escapeHtml(section.title)}</span>
+                    <span class="table-section-count">${section.items.length}</span>
+                    ${section.collapsible && !forceExpand ? sectionToggleButton(pageKey, section, expanded) : ""}
+                </div>
+            </td>
+        `;
+        fragment.appendChild(header);
+
+        if (!expanded) return;
+
+        if (!section.items.length) {
+            const empty = document.createElement("tr");
+            empty.innerHTML = `<td colspan="${colspan}" class="empty-table empty-table-compact">${escapeHtml(section.emptyText || "Nothing here.")}</td>`;
+            fragment.appendChild(empty);
+            return;
+        }
+
+        section.items.forEach(function (task) {
+            fragment.appendChild(buildTaskRow(task, Object.assign({}, rowOptions, {
+                extraClass: section.collapsible ? "row-others" : ""
+            })));
+        });
+
+    });
+
+    tbody.appendChild(fragment);
 
 }
 
@@ -1905,21 +1500,20 @@ function renderTasksTable() {
     const tbody = document.getElementById("allTasksTable");
     if (!tbody) return;
 
-    const search = document.getElementById("taskSearch")?.value?.toLowerCase() || "";
-    const department = document.getElementById("departmentFilter")?.value || "";
-    const priority = document.getElementById("priorityFilter")?.value || "";
-    const status = document.getElementById("statusFilter")?.value || "";
+    const search = document.getElementById("taskSearch")?.value?.trim().toLowerCase() || "";
+    const department = getInput("departmentFilter");
+    const priority = getInput("priorityFilter");
+    const status = getInput("statusFilter");
 
     const noActiveFilters = !search && !department && !priority && !status;
 
-    const filtered = tasks.filter(function(task) {
+    const filtered = tasks.filter(function (task) {
 
         const text = (task.task + " " + task.description + " " + task.assignedTo + " " + task.department + " " + task.taskId).toLowerCase();
 
         if (search && !text.includes(search)) return false;
         if (department && task.department !== department) return false;
         if (priority && task.priority !== priority) return false;
-
         if (status === "Overdue") return isOverdue(task);
         if (status && task.status !== status) return false;
 
@@ -1930,108 +1524,77 @@ function renderTasksTable() {
     tbody.innerHTML = "";
 
     if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="9" class="empty-table">No matching tasks available.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-table">${dataEverLoaded || !noActiveFilters ? "No matching tasks." : "Loading tasks…"}</td></tr>`;
         return;
     }
 
-    /* With no search/filter active, group into My Tasks → primary
-       department → other accessible departments (each sorted by due
-       date then priority) so the most relevant work surfaces first.
-       As soon as the person searches or filters, show a single flat
-       list — still sorted by due date + priority — since they're
-       looking for something specific rather than browsing by section. */
-    if (noActiveFilters && currentUser) {
-
-        const sections = buildTaskSections(filtered);
-
-        const fragment = document.createDocumentFragment();
-
-        sections.forEach(function(section) {
-
-            const headerRow = document.createElement("tr");
-            headerRow.className = "table-section-row";
-            headerRow.innerHTML = `<td colspan="9"><div class="table-section-header">${escapeHTML(section.title)}<span class="table-section-count">${section.tasks.length}</span></div></td>`;
-            fragment.appendChild(headerRow);
-
-            section.tasks.forEach(function(task) {
-                fragment.appendChild(buildAllTasksRow(task));
-            });
-
-        });
-
-        tbody.appendChild(fragment);
-
-    } else {
-
-        const ordered = filtered.slice().sort(compareTasksByDueDateThenPriority);
-
-        batchRows(tbody, ordered, buildAllTasksRow);
-
+    // Admins who search/filter get one flat list. Everyone else always sees
+    // My Tasks + Others; a text search opens the Others section automatically
+    // so matches there aren't hidden.
+    if (isPrivilegedUser() && !noActiveFilters) {
+        batchRows(tbody, filtered.slice().sort(makeSectionComparator("dueDate")), function (task) { return buildTaskRow(task); });
+        return;
     }
 
-    // Single delegated listener set up once (see initializeAllTasksTableDelegation)
-    // handles clicks for every row, so re-rendering the table on every keystroke
-    // no longer means re-attaching hundreds of listeners.
+    renderSectionedTable(tbody, filtered, "tasks", 9, {}, !!search);
 
 }
 
-let allTasksTableDelegationReady = false;
+let tableDelegationReady = false;
 
-function initializeAllTasksTableDelegation() {
+function initializeTableDelegation() {
 
-    if (allTasksTableDelegationReady) return;
+    if (tableDelegationReady) return;
+    tableDelegationReady = true;
 
-    const tbody = document.getElementById("allTasksTable");
-    if (!tbody) return;
+    ["allTasksTable", "departmentTasksTable", "recentTasksTable"].forEach(function (id) {
 
-    tbody.addEventListener("click", function(event) {
+        const tbody = document.getElementById(id);
+        if (!tbody) return;
 
-        const editButton = event.target.closest(".edit-task");
+        tbody.addEventListener("click", function (event) {
 
-        if (editButton) {
-            event.stopPropagation();
-            editTask(editButton.dataset.id);
-            return;
-        }
+            const toggle = event.target.closest(".section-toggle");
+            if (toggle) {
+                event.stopPropagation();
+                toggleSection(toggle.dataset.pageKey, toggle.dataset.sectionKey);
+                return;
+            }
 
-        const row = event.target.closest(".row-clickable");
-        if (row && row.dataset.id) {
-            openTaskDetailDrawer(row.dataset.id);
-        }
+            const editButton = event.target.closest(".edit-task");
+            if (editButton) {
+                event.stopPropagation();
+                editTask(editButton.dataset.id);
+                return;
+            }
+
+            const row = event.target.closest(".row-clickable");
+            if (row && row.dataset.id) openTaskDetailDrawer(row.dataset.id);
+
+        });
 
     });
-
-    allTasksTableDelegationReady = true;
 
 }
 
 /* =========================================================
-   FOLLOWUPS
+   FOLLOW-UPS
 ========================================================= */
 
 function updateFollowupSummary() {
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = startOfToday();
 
-    const todayCount = tasks.filter(function(task) {
-        return task.followupDate && sameDate(task.followupDate, today);
-    }).length;
-
-    const overdue = tasks.filter(function(task) {
-        return task.followupDate && dateBeforeToday(task.followupDate);
-    }).length;
-
-    const upcoming = tasks.filter(function(task) {
-        if (!task.followupDate) return false;
-        const date = parseDate(task.followupDate);
+    const todayCount = tasks.filter(function (t) { return t.followupDate && sameDate(t.followupDate, today); }).length;
+    const overdue = tasks.filter(function (t) { return t.followupDate && dateBeforeToday(t.followupDate); }).length;
+    const upcoming = tasks.filter(function (t) {
+        const date = parseDate(t.followupDate);
         return date && date > today;
     }).length;
 
     animateNumber("followupsToday", todayCount);
     animateNumber("followupsOverdue", overdue);
     animateNumber("followupsUpcoming", upcoming);
-
     animateNumber("followupPageToday", todayCount);
     animateNumber("followupPageOverdue", overdue);
     animateNumber("followupPageUpcoming", upcoming);
@@ -2043,33 +1606,29 @@ function renderFollowups() {
     const tbody = document.getElementById("followupsTable");
     if (!tbody) return;
 
+    const followups = tasks
+        .filter(function (t) { return t.followupDate; })
+        .sort(function (a, b) { return String(a.followupDate).localeCompare(String(b.followupDate)); });
+
     tbody.innerHTML = "";
 
-    const followups = tasks
-        .filter(function(t) { return t.followupDate; })
-        .sort(function(a,b) { return String(a.followupDate).localeCompare(String(b.followupDate)); });
-
     if (!followups.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-table">No follow-ups available.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-table">No follow-ups scheduled.</td></tr>`;
         return;
     }
 
-    batchRows(tbody, followups, function(task) {
-
+    batchRows(tbody, followups, function (task) {
         const row = document.createElement("tr");
-
         row.innerHTML = `
-            <td>${escapeHTML(task.taskId)}</td>
-            <td>${escapeHTML(task.task)}</td>
-            <td>${escapeHTML(task.department)}</td>
-            <td>${escapeHTML(task.assignedTo)}</td>
+            <td>${escapeHtml(task.taskId)}</td>
+            <td>${escapeHtml(task.task)}</td>
+            <td>${escapeHtml(task.department)}</td>
+            <td class="owners-cell">${ownersDisplay(task.assignedTo)}</td>
             <td>${displayDate(task.followupDate)}</td>
-            <td>${escapeHTML(task.lastAction || "-")}</td>
+            <td>${escapeHtml(task.lastAction || "-")}</td>
             <td>${statusBadge(task.status, task)}</td>
         `;
-
         return row;
-
     });
 
 }
@@ -2080,6 +1639,10 @@ function renderFollowups() {
 
 function openDepartment(department) {
     currentDepartment = department;
+    currentPage = "department";
+    document.querySelectorAll(".nav-item").forEach(function (item) {
+        item.classList.toggle("active", item.dataset.department === department);
+    });
     showDepartmentPage(department);
 }
 
@@ -2087,140 +1650,65 @@ function showDepartmentPage(department) {
 
     currentDepartment = department;
 
-    document.querySelectorAll(".page").forEach(function(section) {
-        section.classList.remove("active-page");
-    });
+    document.querySelectorAll(".page").forEach(function (s) { s.classList.remove("active-page"); });
+    document.getElementById("departmentDetailPage")?.classList.add("active-page");
 
-    const page = document.getElementById("departmentDetailPage");
-    if (page) page.classList.add("active-page");
-
+    setText("pageTitle", department);
+    setText("pageSubtitle", "Department operational overview");
     setText("departmentDetailCode", getDepartmentCode(department));
     setText("departmentDetailTitle", department);
     setText("departmentDetailSubtitle", "Department operational overview.");
+    setText("departmentTasksScopeText", isPrivilegedUser()
+        ? "Tasks assigned to this department."
+        : "Tasks in this department that you can see.");
 
-    const departmentTasks = tasks.filter(function(task) { return task.department === department; });
+    const list = tasks.filter(function (t) { return t.department === department; });
 
-    setText("departmentTotal", departmentTasks.length);
-    setText("departmentOpen", departmentTasks.filter(function(t) { return t.status === "Open"; }).length);
-    setText("departmentProgress", departmentTasks.filter(function(t) { return t.status === "In Progress"; }).length);
-    setText("departmentBlocked", departmentTasks.filter(function(t) { return t.status === "Blocked"; }).length);
-    setText("departmentCompleted", departmentTasks.filter(function(t) { return t.status === "Completed"; }).length);
-    setText("departmentOverdue", departmentTasks.filter(isOverdue).length);
-
-    renderDepartmentTasks(departmentTasks);
-
-}
-
-function renderDepartmentTasks(departmentTasks) {
+    setText("departmentTotal", list.length);
+    setText("departmentOpen", countStatus(list, "Open"));
+    setText("departmentProgress", countStatus(list, "In Progress"));
+    setText("departmentOnHold", countStatus(list, STATUS_ON_HOLD));
+    setText("departmentCompleted", countStatus(list, "Completed"));
+    setText("departmentOverdue", list.filter(isOverdue).length);
 
     const tbody = document.getElementById("departmentTasksTable");
     if (!tbody) return;
-
-    const ordered = sortMineFirst(departmentTasks, function(task) { return task.assignedTo; });
 
     tbody.innerHTML = "";
 
-    if (!ordered.length) {
-        tbody.innerHTML = `<tr><td colspan="9" class="empty-table">No department tasks available.</td></tr>`;
+    if (!list.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-table">No tasks you can see in this department.</td></tr>`;
         return;
     }
 
-    batchRows(tbody, ordered, function(task) {
-
-        const row = document.createElement("tr");
-        row.className = "row-clickable" + (isDueSoon(task) ? " row-due-soon" : "");
-        row.dataset.id = task.taskId;
-
-        row.innerHTML = `
-            <td>${escapeHTML(task.taskId)}</td>
-            <td>${escapeHTML(task.task)}</td>
-            <td>${escapeHTML(task.assignedTo)}</td>
-            <td>${priorityBadge(task.priority)}</td>
-            <td>${statusBadge(task.status, task)}</td>
-            <td>${dueDateWithChip(task)}</td>
-            <td>${displayDate(task.followupDate)}</td>
-            <td class="checklist-cell">${checklistStatusDot("task:" + task.taskId)}</td>
-            <td>${isPrivilegedUser() ? `<button class="table-action edit-department-task" data-id="${escapeHTML(task.taskId)}">Edit</button>` : `<span class="table-action-view">View</span>`}</td>
-        `;
-
-        return row;
-
-    });
-
-    initializeDepartmentTasksTableDelegation();
+    renderSectionedTable(tbody, list, "department:" + department, 9, { variant: "department" }, false);
 
 }
-
-let departmentTasksTableDelegationReady = false;
-
-function initializeDepartmentTasksTableDelegation() {
-
-    if (departmentTasksTableDelegationReady) return;
-
-    const tbody = document.getElementById("departmentTasksTable");
-    if (!tbody) return;
-
-    tbody.addEventListener("click", function(event) {
-
-        const editButton = event.target.closest(".edit-department-task");
-
-        if (editButton) {
-            event.stopPropagation();
-            editTask(editButton.dataset.id);
-            return;
-        }
-
-        const row = event.target.closest(".row-clickable");
-        if (row && row.dataset.id) {
-            openTaskDetailDrawer(row.dataset.id);
-        }
-
-    });
-
-    departmentTasksTableDelegationReady = true;
-
-}
-
-/* =========================================================
-   DEPARTMENT CARDS
-========================================================= */
 
 function renderDepartmentCards() {
 
     const container = document.getElementById("departmentsGrid");
     if (!container) return;
 
-    container.innerHTML = "";
-
-    DEPARTMENTS.forEach(function (department) {
-
-        const departmentTasks = tasks.filter(function(task) { return task.department === department; });
-
-        const completed = departmentTasks.filter(function(task) { return task.status === "Completed"; }).length;
-        const blocked = departmentTasks.filter(function(task) { return task.status === "Blocked"; }).length;
-        const overdue = departmentTasks.filter(isOverdue).length;
-
-        const card = document.createElement("div");
-        card.className = "department-card";
-
-        card.innerHTML = `
-            <div class="department-card-code">${getDepartmentCode(department)}</div>
-            <h3>${escapeHTML(department)}</h3>
-            <div class="department-card-stats">
-                <div><strong>${departmentTasks.length}</strong><span>Total</span></div>
-                <div><strong>${completed}</strong><span>Completed</span></div>
-                <div><strong>${blocked}</strong><span>Blocked</span></div>
-                <div><strong>${overdue}</strong><span>Overdue</span></div>
+    container.innerHTML = DEPARTMENTS.map(function (department) {
+        const list = tasks.filter(function (t) { return t.department === department; });
+        return `
+            <div class="department-card">
+                <div class="department-card-code">${getDepartmentCode(department)}</div>
+                <h3>${escapeHtml(department)}</h3>
+                <div class="department-card-stats">
+                    <div><strong>${list.length}</strong><span>Total</span></div>
+                    <div><strong>${countStatus(list, "Completed")}</strong><span>Completed</span></div>
+                    <div><strong>${countStatus(list, STATUS_ON_HOLD)}</strong><span>On Hold</span></div>
+                    <div><strong>${list.filter(isOverdue).length}</strong><span>Overdue</span></div>
+                </div>
+                <button class="secondary-button department-view-button" data-department="${escapeHtml(department)}">View Department</button>
             </div>
-            <button class="secondary-button department-view-button">View Department</button>
         `;
+    }).join("");
 
-        card.querySelector("button").addEventListener("click", function() {
-            openDepartment(department);
-        });
-
-        container.appendChild(card);
-
+    container.querySelectorAll(".department-view-button").forEach(function (button) {
+        button.addEventListener("click", function () { openDepartment(button.dataset.department); });
     });
 
 }
@@ -2239,81 +1727,81 @@ function renderActivity() {
         return;
     }
 
-    const activities = [...tasks]
-        .sort(function(a,b) { return String(b.updatedDate).localeCompare(String(a.updatedDate)); })
+    const activities = tasks.slice()
+        .sort(function (a, b) { return String(b.updatedDate).localeCompare(String(a.updatedDate)); })
         .slice(0, 20);
 
-    container.innerHTML = "";
-
-    batchRows(container, activities, function(task) {
-
-        const item = document.createElement("div");
-        item.className = "activity-item";
-
-        item.innerHTML = `
-            <div class="activity-dot"></div>
-            <div class="activity-content">
-                <strong>${escapeHTML(task.task)}</strong>
-                <p>${escapeHTML(task.status)} · ${escapeHTML(task.department)}</p>
-                <small>Updated by ${escapeHTML(task.updatedBy || "System")} · ${escapeHTML(displayDate(task.updatedDate))}</small>
+    container.innerHTML = activities.map(function (task) {
+        return `
+            <div class="activity-item">
+                <div class="activity-dot"></div>
+                <div class="activity-content">
+                    <strong>${escapeHtml(task.task)}</strong>
+                    <p>${escapeHtml(task.status)} · ${escapeHtml(task.department)}</p>
+                    <small>Updated by ${escapeHtml(task.updatedBy || "System")} · ${escapeHtml(displayDate(task.updatedDate))}</small>
+                </div>
             </div>
         `;
-
-        return item;
-
-    });
+    }).join("");
 
 }
 
 /* =========================================================
-   TASK BUTTONS
+   TASK MODAL
 ========================================================= */
+
+let editingTaskId = "";
 
 function initializeTaskButtons() {
 
-    ["topAddTask", "dashboardAddTask", "tasksAddButton", "departmentAddTaskButton"].forEach(function(id) {
-
-        const button = document.getElementById(id);
-        if (!button) return;
-
-        button.addEventListener("click", function() { openTaskModal(); });
-
+    ["topAddTask", "dashboardAddTask", "tasksAddButton", "departmentAddTaskButton"].forEach(function (id) {
+        document.getElementById(id)?.addEventListener("click", function () { openTaskModal(); });
     });
 
-    const close = document.getElementById("closeTaskModal");
-    const cancel = document.getElementById("cancelTaskButton");
-
-    if (close) close.addEventListener("click", closeTaskModal);
-    if (cancel) cancel.addEventListener("click", closeTaskModal);
+    document.getElementById("closeTaskModal")?.addEventListener("click", closeTaskModal);
+    document.getElementById("cancelTaskButton")?.addEventListener("click", closeTaskModal);
 
     const overlay = document.getElementById("taskModal");
-
-    if (overlay) {
-        overlay.addEventListener("click", function(event) {
-            if (event.target === overlay) closeTaskModal();
-        });
-    }
-
-    document.addEventListener("keydown", function(event) {
-        if (event.key === "Escape") closeTaskModal();
+    overlay?.addEventListener("click", function (event) {
+        if (event.target === overlay) closeTaskModal();
     });
 
 }
 
-/* =========================================================
-   TASK FORM
-========================================================= */
+function initializeKeyboardShortcuts() {
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key !== "Escape") return;
+        if (document.querySelector(".owner-picker.is-open")) {
+            document.querySelectorAll(".owner-picker.is-open").forEach(function (p) { p._picker?.close(); });
+            return;
+        }
+        closeAllOverlays();
+    });
+
+}
+
+function closeAllOverlays() {
+    closeTaskModal();
+    closeRegularTaskUpdate();
+    closeBacklogItemModal();
+    closeBacklogDetailDrawer();
+    closeRegularTaskChecklistDrawer();
+    if (taskDetailCurrentId) closeTaskDetailDrawer();
+}
 
 function initializeTaskForm() {
-
-    const form = document.getElementById("taskForm");
-    if (!form) return;
-
-    form.addEventListener("submit", async function(event) {
+    document.getElementById("taskForm")?.addEventListener("submit", async function (event) {
         event.preventDefault();
         await saveTask();
     });
+}
 
+function showTaskFormError(message) {
+    const box = document.getElementById("taskFormError");
+    if (!box) return;
+    box.textContent = message || "";
+    box.style.display = message ? "block" : "none";
 }
 
 function openTaskModal(task = null) {
@@ -2321,60 +1809,52 @@ function openTaskModal(task = null) {
     const modal = document.getElementById("taskModal");
     if (!modal) return;
 
-    modal.style.display = "flex";
-
-    const title = document.getElementById("taskModalTitle");
+    showTaskFormError("");
 
     if (task) {
-
         editingTaskId = task.taskId;
-
-        if (title) title.textContent = "Edit Task";
-
+        setText("taskModalTitle", "Edit Task");
         populateTaskForm(task);
-
     } else {
-
         editingTaskId = "";
-
-        if (title) title.textContent = "Add New Task";
-
+        setText("taskModalTitle", "Add New Task");
         clearTaskForm();
-
-        if (currentDepartment) {
-            setInput("taskDepartment", currentDepartment);
-        }
-
+        if (currentPage === "department" && currentDepartment) setInput("taskDepartment", currentDepartment);
+        else if (currentPage === "bookFair") setInput("taskDepartment", "Book Fair - Events");
+        // Default a new task to its creator.
+        if (taskOwnerPicker && currentUser) taskOwnerPicker.setValue(currentUser.name || currentUser.username);
     }
+
+    modal.style.display = "flex";
+    document.body.classList.add("modal-open");
+    setTimeout(function () { document.getElementById("taskName")?.focus(); }, 50);
 
 }
 
 function closeTaskModal() {
-
     const modal = document.getElementById("taskModal");
-    if (modal) modal.style.display = "none";
-
+    if (modal && modal.style.display !== "none") {
+        modal.style.display = "none";
+        document.body.classList.remove("modal-open");
+    }
+    taskOwnerPicker?.close();
     editingTaskId = "";
-
 }
 
 function clearTaskForm() {
-
-    const form = document.getElementById("taskForm");
-    if (form) form.reset();
-
+    document.getElementById("taskForm")?.reset();
     setInput("editTaskId", "");
     setInput("taskPriority", "Medium");
     setInput("taskStatus", "Open");
-
+    setInput("taskCreatedDate", todayInput());
+    taskOwnerPicker?.setValue("");
 }
 
 function populateTaskForm(task) {
-
     setInput("editTaskId", task.taskId);
     setInput("taskName", task.task);
+    setInput("taskDescription", task.description);
     setInput("taskDepartment", task.department);
-    setInput("taskAssignedTo", task.assignedTo);
     setInput("taskPriority", task.priority);
     setInput("taskStatus", task.status);
     setInput("taskCreatedDate", task.createdDate);
@@ -2382,12 +1862,8 @@ function populateTaskForm(task) {
     setInput("taskFollowupDate", task.followupDate);
     setInput("taskFollowupAction", task.lastAction);
     setInput("taskRemarks", task.remarks);
-
+    taskOwnerPicker?.setValue(task.assignedTo);
 }
-
-/* =========================================================
-   SAVE TASK
-========================================================= */
 
 async function saveTask() {
 
@@ -2396,9 +1872,11 @@ async function saveTask() {
     const submitButton = document.querySelector("#taskForm .primary-button");
     setButtonLoading(submitButton, true);
 
-    await guardAsync("saveTask", saveTaskRequest);
-
-    setButtonLoading(submitButton, false);
+    try {
+        await guardAsync("saveTask", saveTaskRequest);
+    } finally {
+        setButtonLoading(submitButton, false);
+    }
 
 }
 
@@ -2407,917 +1885,774 @@ async function saveTaskRequest() {
     const editId = getInput("editTaskId");
 
     const task = {
-
         taskId: editId,
-        task: getInput("taskName"),
+        task: getInput("taskName").trim(),
         description: getInput("taskDescription"),
         department: getInput("taskDepartment"),
-        assignedTo: getInput("taskAssignedTo"),
+        assignedTo: taskOwnerPicker ? taskOwnerPicker.getValue() : "",
         priority: getInput("taskPriority") || "Medium",
         status: getInput("taskStatus") || "Open",
-        createdDate: getInput("taskCreatedDate") || todayInput(),
         dueDate: getInput("taskDueDate"),
         followupDate: getInput("taskFollowupDate"),
         lastAction: getInput("taskFollowupAction"),
-        remarks: getInput("taskRemarks"),
-        updatedBy: currentUser?.name || currentUser?.username || "Operations Head"
-
+        remarks: getInput("taskRemarks")
     };
 
-    if (!task.task) {
-        showNotification("Missing Information", "Please enter a task.");
-        return;
-    }
+    if (!task.task) return showTaskFormError("Enter a task name.");
+    if (!task.department) return showTaskFormError("Choose a department.");
+    if (!task.assignedTo) return showTaskFormError("Choose at least one owner.");
+    if (!task.dueDate) return showTaskFormError("Pick a due date.");
 
-    let result;
+    showTaskFormError("");
 
-    if (editId) {
-        result = await apiRequest("updateTask", { task: task });
-    } else {
-        result = await apiRequest("createTask", { task: task });
-    }
+    const result = await apiRequest(editId ? "updateTask" : "createTask", { task: task });
 
     if (!result || !result.success) {
-        showNotification("Error", result?.message || "Unable to save task.");
+        showTaskFormError(result?.message || "Couldn't save the task. Try again.");
         return;
     }
 
     closeTaskModal();
-    showNotification("Saved", "Task saved successfully.");
-
+    showNotification("Saved", editId ? "Task updated." : "Task created.");
     upsertLocalTask(result.task);
 
 }
 
 function editTask(taskId) {
-
-    const task = tasks.find(function(t) { return t.taskId === taskId; });
-
-    if (!task) {
-        showNotification("Error", "Task not found.");
-        return;
-    }
-
+    const task = tasks.find(function (t) { return t.taskId === taskId; });
+    if (!task) return showNotification("Error", "Task not found.");
     openTaskModal(task);
-
 }
 
 /* =========================================================
-   FILTERS
+   FILTERS / EXPORT
 ========================================================= */
 
 function initializeFilters() {
 
     const debouncedRender = debounce(renderTasksTable, 180);
 
-    ["taskSearch", "departmentFilter", "priorityFilter", "statusFilter"].forEach(function(id) {
+    document.getElementById("taskSearch")?.addEventListener("input", debouncedRender);
 
-        const element = document.getElementById(id);
-        if (!element) return;
-
-        // Free-text search is debounced so a fast typist doesn't
-        // trigger a full table rebuild on every single keystroke.
-        // Dropdown filters change rarely, so they still update instantly.
-        if (id === "taskSearch") {
-            element.addEventListener("input", debouncedRender);
-        } else {
-            element.addEventListener("input", renderTasksTable);
-        }
-
-        element.addEventListener("change", renderTasksTable);
-
+    ["departmentFilter", "priorityFilter", "statusFilter"].forEach(function (id) {
+        document.getElementById(id)?.addEventListener("change", renderTasksTable);
     });
 
 }
 
-/* =========================================================
-   EXPORT
-========================================================= */
-
 function initializeExports() {
-
-    const button = document.getElementById("exportTasksButton");
-
-    if (button) {
-        button.addEventListener("click", exportTasksCSV);
-    }
-
+    document.getElementById("exportTasksButton")?.addEventListener("click", exportTasksCSV);
 }
 
 function exportTasksCSV() {
 
-    if (!tasks.length) {
-        showNotification("Export", "There are no tasks to export.");
-        return;
-    }
+    if (!tasks.length) return showNotification("Export", "There are no tasks to export.");
 
-    const headers = [
-        "Task ID", "Department", "Task", "Description", "Assigned To", "Priority", "Status",
-        "Created Date", "Due Date", "Follow-up Date", "Last Action", "Remarks", "Updated By", "Updated Date"
-    ];
+    const headers = ["Task ID", "Department", "Task", "Description", "Owners", "Priority", "Status",
+        "Created Date", "Due Date", "Follow-up Date", "Last Action", "Remarks", "Updated By", "Updated Date"];
 
-    const rows = tasks.map(function(task) {
-        return [
-            task.taskId, task.department, task.task, task.description, task.assignedTo,
-            task.priority, task.status, task.createdDate, task.dueDate, task.followupDate,
-            task.lastAction, task.remarks, task.updatedBy, task.updatedDate
-        ];
+    const rows = tasks.map(function (t) {
+        return [t.taskId, t.department, t.task, t.description, t.assignedTo, t.priority, t.status,
+            t.createdDate, t.dueDate, t.followupDate, t.lastAction, t.remarks, t.updatedBy, t.updatedDate];
     });
 
-    const csv = [headers, ...rows].map(function(row) {
-        return row.map(csvEscape).join(",");
-    }).join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const csv = [headers].concat(rows).map(function (row) { return row.map(csvEscape).join(","); }).join("\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
 
     const link = document.createElement("a");
     link.href = url;
     link.download = "Excelso_Operations_Tasks.csv";
+    document.body.appendChild(link);
     link.click();
+    link.remove();
 
-    URL.revokeObjectURL(url);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
 
 }
 
 /* =========================================================
-   DATE HELPERS
+   DATES
+   Handles yyyy-MM-dd, MM-dd-yyyy, M/d/yyyy and MM-dd-yy (the
+   formats found in the sheet). Safari can't parse "09-30-2026"
+   on its own, which made due dates disappear there.
 ========================================================= */
 
 function parseDate(value) {
 
     if (!value) return null;
-    if (value instanceof Date) return value;
+    if (value instanceof Date) return isNaN(value.getTime()) ? null : new Date(value.getTime());
 
-    const date = new Date(value);
+    const text = String(value).trim();
 
-    if (isNaN(date.getTime())) return null;
+    let m = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 
-    return date;
+    m = text.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(\s|$)/);
+    if (m) {
+        let a = Number(m[1]), b = Number(m[2]), year = Number(m[3]);
+        if (year < 100) year += 2000;
+        let month = a, day = b;
+        if (a > 12 && b <= 12) { month = b; day = a; }
+        const date = new Date(year, month - 1, day);
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    const date = new Date(text);
+    return isNaN(date.getTime()) ? null : date;
 
 }
 
 function formatDateForInput(value) {
-
     if (!value) return "";
-
-    const text = String(value);
-
-    const direct = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
-
-    if (direct) {
-        return direct[1] + "-" + direct[2] + "-" + direct[3];
-    }
-
     const date = parseDate(value);
-    if (!date) return "";
-
+    if (!date) return String(value);
     return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
-
 }
 
 function displayDate(value) {
-
     if (!value) return "-";
-
     const date = parseDate(value);
-    if (!date) return value;
-
+    if (!date) return escapeHtml(value);
     return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-
 }
 
 function todayInput() { return formatDateForInput(new Date()); }
 
+function startOfToday() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
+}
+
 function sameDate(value, date) {
-
     const parsed = parseDate(value);
-    if (!parsed) return false;
-
-    return parsed.getFullYear() === date.getFullYear() &&
-           parsed.getMonth() === date.getMonth() &&
-           parsed.getDate() === date.getDate();
-
+    return !!parsed && parsed.getFullYear() === date.getFullYear() && parsed.getMonth() === date.getMonth() && parsed.getDate() === date.getDate();
 }
 
 function dateBeforeToday(value) {
-
     const date = parseDate(value);
     if (!date) return false;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     date.setHours(0, 0, 0, 0);
-
-    return date < today;
-
+    return date < startOfToday();
 }
 
 function isOverdue(task) {
-
     if (!task.dueDate || task.status === "Completed") return false;
-
     return dateBeforeToday(task.dueDate);
-
 }
-
-/* =========================================================
-   DUE-SOON HIGHLIGHTING
-   Anything due within the next 3 days (today, tomorrow, or the
-   day after — but not already overdue, and not Completed) gets
-   flagged so it can be visually highlighted in red across every
-   task list: All Tasks, Recent Tasks, Department Tasks, Book Fair,
-   Regular Tasks (against expectedDate) and Backlog (when its
-   optional Expected Date / Period happens to parse as a real date).
-   `dateField` defaults to "dueDate" but Regular Tasks passes
-   "expectedDate" instead.
-========================================================= */
 
 function isDueSoon(task, dateField = "dueDate") {
-
     if (!task || task.status === "Completed") return false;
-
-    const value = task[dateField];
-    if (!value) return false;
-
-    const date = parseDate(value);
+    const date = parseDate(task[dateField]);
     if (!date) return false;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     date.setHours(0, 0, 0, 0);
-
-    const diffDays = Math.round((date.getTime() - today.getTime()) / 86400000);
-
-    // diffDays < 0 is already overdue (handled separately by isOverdue's
-    // own styling), so due-soon only covers "not yet due, but within 3 days".
+    const diffDays = Math.round((date.getTime() - startOfToday().getTime()) / 86400000);
     return diffDays >= 0 && diffDays <= 3;
-
 }
 
-/* Wraps a formatted date with a small red "Due Soon" chip when the task
-   is due within 3 days. Used anywhere a plain displayDate() call is
-   shown for a due/expected date in a table or card. */
 function dueDateWithChip(task, dateField = "dueDate") {
-
     const formatted = displayDate(task[dateField]);
-
-    if (!isDueSoon(task, dateField)) return formatted;
-
-    return `${formatted} <span class="due-soon-chip">Due Soon</span>`;
-
+    return isDueSoon(task, dateField) ? `${formatted} <span class="due-soon-chip">Due Soon</span>` : formatted;
 }
 
 /* =========================================================
-   BADGES
+   BADGES / MISC
 ========================================================= */
 
 function priorityBadge(priority) {
-    return `<span class="priority-badge priority-${String(priority).toLowerCase()}">${escapeHTML(priority)}</span>`;
+    return `<span class="priority-badge priority-${escapeHtml(String(priority || "").toLowerCase())}">${escapeHtml(priority || "-")}</span>`;
 }
 
 function statusBadge(status, task) {
-
-    let displayStatus = status;
-
-    if (status !== "Completed" && isOverdue(task)) {
-        displayStatus = "Overdue";
-    }
-
-    return `<span class="status-badge status-${String(displayStatus).toLowerCase().replace(/\s+/g, "-")}">${escapeHTML(displayStatus)}</span>`;
-
+    let display = normalizeStatus(status);
+    if (display !== "Completed" && task && isOverdue(task)) display = "Overdue";
+    return `<span class="status-badge status-${escapeHtml(display.toLowerCase().replace(/\s+/g, "-"))}">${escapeHtml(display)}</span>`;
 }
-
-/* =========================================================
-   HELPERS
-========================================================= */
 
 function getDepartmentCode(department) {
-
     const codes = {
-        "B2B - Sales": "B2B",
-        "Customer Support": "CS",
-        "Warehouse": "WH",
-        "Scanning - Catalog": "SC",
-        "Listing - Inventory": "LI",
-        "Digital Marketing": "DM",
-        "IT - Software Development": "IT",
-        "Finance": "FN",
-        "Book Fair - Events": "BF",
-        "Books and Supply Procurement": "BP",
-        "HR": "HR",
-        "Data Analysis": "DA",
-        "Software Testing": "ST",
-        "Product Development": "PD"
+        "B2B - Sales": "B2B", "Customer Support": "CS", "Warehouse": "WH", "Scanning - Catalog": "SC",
+        "Listing - Inventory": "LI", "Digital Marketing": "DM", "IT - Software Development": "IT",
+        "Finance": "FN", "Book Fair - Events": "BF", "Books and Supply Procurement": "BP", "HR": "HR",
+        "Data Analysis": "DA", "Software Testing": "ST", "Product Development": "PD"
     };
-
     return codes[department] || "DP";
-
 }
-
-function setText(id, value) {
-    const element = document.getElementById(id);
-    if (element) element.textContent = value;
-}
-
-function setInput(id, value) {
-    const element = document.getElementById(id);
-    if (element) element.value = value || "";
-}
-
-function getInput(id) {
-    const element = document.getElementById(id);
-    return element ? element.value : "";
-}
-
-function escapeHTML(value) {
-
-    if (value === null || value === undefined) return "";
-
-    return String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-
-}
-
-function csvEscape(value) {
-    const text = String(value ?? "");
-    return '"' + text.replace(/"/g, '""') + '"';
-}
-/* =========================================================
-   NOTIFICATION
-========================================================= */
 
 function showNotification(title, message) {
 
     const notification = document.getElementById("notification");
-    const titleElement = document.getElementById("notificationTitle");
-    const messageElement = document.getElementById("notificationMessage");
-
     if (!notification) return;
 
-    if (titleElement) titleElement.textContent = title;
-    if (messageElement) messageElement.textContent = message;
+    setText("notificationTitle", title);
+    setText("notificationMessage", message);
 
+    notification.classList.remove("show");
+    void notification.offsetWidth; // restart animation
     notification.classList.add("show");
 
-    setTimeout(function() {
-        notification.classList.remove("show");
-    }, 3500);
-
-}
-
-/* =========================================================================
-   NEW FEATURES — Backlog, Checklists, Task Detail Drawer, Book Fair
-   ---------------------------------------------------------------------
-   PERSISTENCE: Checklists, comments and backlog items are now saved
-   through the Apps Script backend (Task Checklists / Task Comments /
-   Backlog sheet tabs) via apiRequest() — the same pattern loadTasks()
-   uses. Each is cached in memory (allChecklists, allComments,
-   backlogTasks) and reloaded after every write, so everyone sees the
-   same data regardless of device or browser.
-========================================================================= */
-
-let allChecklists = {};   // taskId -> array of checklist items
-let allComments = {};     // taskId (or backlogId) -> array of comments
-let backlogTasks = [];    // array of backlog items from the backend
-
-let taskDetailCurrentId = "";
-let backlogDetailCurrentId = "";
-
-function generateLocalId(prefix) {
-    return prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
-
-function currentUserLabel() {
-    return (currentUser && (currentUser.name || currentUser.username)) || "Website";
-}
-
-/* ---------------------------------------------------------------------
-   BACKEND LOADERS
---------------------------------------------------------------------- */
-
-async function loadAllChecklists() {
-
-    const result = await apiRequest("getTaskChecklists", { taskId: "" });
-
-    allChecklists = {};
-
-    if (result && result.success && Array.isArray(result.checklists)) {
-        result.checklists.forEach(function(item) {
-            const key = item.taskId;
-            if (!allChecklists[key]) allChecklists[key] = [];
-            allChecklists[key].push(item);
-        });
-    }
-
-}
-
-async function loadAllComments() {
-
-    const result = await apiRequest("getTaskComments", { taskId: "" });
-
-    allComments = {};
-
-    if (result && result.success && Array.isArray(result.comments)) {
-        result.comments.forEach(function(item) {
-            const key = item.taskId;
-            if (!allComments[key]) allComments[key] = [];
-            allComments[key].push(item);
-        });
-    }
-
-}
-
-/* ---------------------------------------------------------------------
-   Scoped refreshes for a single task's checklist/comments. The backend
-   already supports filtering by taskId, so after adding/toggling one
-   item we only need to re-read that one task's rows instead of the
-   whole checklist or comment sheet — much lighter than loadAllChecklists()
-   / loadAllComments(), which is what made every single tick feel slow.
---------------------------------------------------------------------- */
-async function loadChecklistsForTask(taskId) {
-
-    const result = await apiRequest("getTaskChecklists", { taskId: taskId });
-
-    if (result && result.success && Array.isArray(result.checklists)) {
-        allChecklists[taskId] = result.checklists;
-    }
-
-}
-
-async function loadCommentsForTask(taskId) {
-
-    const result = await apiRequest("getTaskComments", { taskId: taskId });
-
-    if (result && result.success && Array.isArray(result.comments)) {
-        allComments[taskId] = result.comments;
-    }
-
-}
-
-let backlogLoadFailed = false;
-let backlogEverLoaded = false;
-
-async function loadBacklogTasks() {
-
-    if (!backlogEverLoaded) {
-        const cached = readCache("backlogTasks");
-        if (cached && Array.isArray(cached.data)) {
-            backlogTasks = cached.data;
-        }
-    }
-
-    const result = await apiRequest("getBacklog", {});
-
-    if (result && result.success && Array.isArray(result.tasks)) {
-        backlogTasks = result.tasks;
-        backlogLoadFailed = false;
-        backlogEverLoaded = true;
-        saveCache("backlogTasks", backlogTasks);
-    } else {
-        // Keep whatever was already loaded/cached rather than clearing it.
-        backlogLoadFailed = true;
-    }
-
-}
-
-/* ---------------------------------------------------------------------
-   ROLE / ACCESS HELPERS
---------------------------------------------------------------------- */
-
-function isPrivilegedUser() {
-
-    if (!currentUser) return false;
-
-    const role = String(currentUser.role || "").trim().toLowerCase();
-
-    return role === "founder" || role === "operations head";
-
-}
-
-function currentUserMatches(assignedTo) {
-
-    if (!currentUser) return false;
-
-    const value = String(assignedTo || "").trim().toLowerCase();
-    if (!value) return false;
-
-    const username = String(currentUser.username || "").trim().toLowerCase();
-    const name = String(currentUser.name || "").trim().toLowerCase();
-
-    return value === username || value === name;
-
-}
-
-function sortMineFirst(list, getAssignee) {
-
-    if (!Array.isArray(list)) return [];
-    if (!currentUser || isPrivilegedUser()) return list.slice();
-
-    return list
-        .map(function(item, index) { return { item: item, index: index }; })
-        .sort(function(a, b) {
-
-            const aMine = currentUserMatches(getAssignee(a.item));
-            const bMine = currentUserMatches(getAssignee(b.item));
-
-            if (aMine && !bMine) return -1;
-            if (!aMine && bMine) return 1;
-
-            return a.index - b.index;
-
-        })
-        .map(function(wrapped) { return wrapped.item; });
+    clearTimeout(showNotification._timer);
+    showNotification._timer = setTimeout(function () { notification.classList.remove("show"); }, 3500);
 
 }
 
 /* =========================================================
-   TASK ORDERING: DUE DATE, THEN PRIORITY
-   Used to sort every group/section of tasks. Tasks with a due
-   date come before tasks without one; within the same due date,
-   High priority comes before Medium, then Low.
-   `dateField` lets this drive Regular Tasks too, which use
-   "expectedDate" instead of "dueDate".
+   REGULAR TASKS
+   Admins: department filter + everything grouped by frequency.
+   Everyone else: "My Regular Tasks" + collapsible
+   "Others in <my department>".
 ========================================================= */
 
-const PRIORITY_SORT_ORDER = { high: 0, medium: 1, low: 2 };
+function initializeRegularTasksPage() {
 
-function makeDateThenPriorityComparator(dateField) {
+    document.getElementById("regularTasksDepartmentFilter")?.addEventListener("change", renderRegularTasks);
 
-    return function(a, b) {
+    const container = document.getElementById("regularTasksContainer");
+    if (!container) return;
 
-        const dateA = parseDate(a[dateField]);
-        const dateB = parseDate(b[dateField]);
+    container.addEventListener("click", function (event) {
 
-        if (dateA && dateB) {
-            const diff = dateA.getTime() - dateB.getTime();
-            if (diff !== 0) return diff;
-        } else if (dateA && !dateB) {
-            return -1;
-        } else if (!dateA && dateB) {
-            return 1;
-        }
-
-        const priorityA = PRIORITY_SORT_ORDER[String(a.priority || "").toLowerCase()] ?? 99;
-        const priorityB = PRIORITY_SORT_ORDER[String(b.priority || "").toLowerCase()] ?? 99;
-
-        return priorityA - priorityB;
-
-    };
-
-}
-
-const compareTasksByDueDateThenPriority = makeDateThenPriorityComparator("dueDate");
-const compareTasksByExpectedDateThenPriority = makeDateThenPriorityComparator("expectedDate");
-
-/* =========================================================
-   RELEVANCE SECTIONS: MY TASKS → PRIMARY DEPARTMENT → OTHERS
-   Groups any list of task-like items (Master Tasks, Book Fair
-   tasks, or Regular Tasks) into: assigned to the logged-in user,
-   their primary department's items, then every other department
-   they have access to — each internally sorted by due/expected
-   date + priority. Used by the All Tasks page, Book Fair, and
-   Regular Tasks so the ordering behaves identically everywhere.
-   `tasks` is already scoped to what this user is allowed to see
-   (see filterTasksForCurrentUser), so "other" here naturally means
-   "other departments they have coordination access to".
-========================================================= */
-
-function buildRelevanceSections(sourceItems, options) {
-
-    const dateField = (options && options.dateField) || "dueDate";
-    const comparator = makeDateThenPriorityComparator(dateField);
-
-    const primaryDepartment = String(currentUser?.primaryDepartment || "").trim();
-    const hasPrimaryDepartment = primaryDepartment && primaryDepartment.toLowerCase() !== "all";
-
-    const mine = [];
-    const primaryDeptItems = [];
-    const otherItems = [];
-
-    sourceItems.forEach(function(item) {
-
-        if (currentUserMatches(item.assignedTo)) {
-            mine.push(item);
+        const toggle = event.target.closest(".section-toggle");
+        if (toggle) {
+            toggleSection(toggle.dataset.pageKey, toggle.dataset.sectionKey);
             return;
         }
 
-        if (hasPrimaryDepartment && item.department === primaryDepartment) {
-            primaryDeptItems.push(item);
+        const checklistButton = event.target.closest(".regular-task-checklist-button");
+        if (checklistButton) {
+            openRegularTaskChecklistDrawer(checklistButton.dataset.regularTaskId);
             return;
         }
 
-        otherItems.push(item);
+        const updateButton = event.target.closest(".regular-task-update-button");
+        if (updateButton) openRegularTaskUpdate(updateButton.dataset.regularTaskId);
 
     });
 
-    mine.sort(comparator);
-    primaryDeptItems.sort(comparator);
-    otherItems.sort(comparator);
+}
 
-    const sections = [];
+function populateRegularTasksDepartmentFilter() {
 
-    if (mine.length) {
-        sections.push({ title: "My Tasks", tasks: mine });
+    const select = document.getElementById("regularTasksDepartmentFilter");
+    if (!select) return;
+
+    const previous = select.value;
+    const departments = Array.from(new Set(regularTasks
+        .map(function (t) { return String(t.department || "").trim(); })
+        .filter(Boolean))).sort();
+
+    select.innerHTML = `<option value="">All Departments</option>` +
+        departments.map(function (d) { return `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`; }).join("");
+
+    if (previous && departments.indexOf(previous) !== -1) select.value = previous;
+
+}
+
+function frequencyGroup(expectedTime) {
+    const f = String(expectedTime || "").trim().toLowerCase();
+    if (!f) return "Other";
+    if (f.indexOf("daily") !== -1 || f === "everyday" || f === "every day") return "Daily";
+    if (f.indexOf("twice") !== -1 && f.indexOf("week") !== -1) return "Twice a Week";
+    if (f.indexOf("week") !== -1) return "Weekly";
+    if (f.indexOf("month") !== -1) return "Monthly";
+    return "Other";
+}
+
+function regularGroupsHtml(list) {
+
+    const groups = {};
+    list.forEach(function (task) {
+        const group = frequencyGroup(task.expectedTime);
+        (groups[group] = groups[group] || []).push(task);
+    });
+
+    const comparator = makeSectionComparator("expectedDate");
+
+    return ["Daily", "Twice a Week", "Weekly", "Monthly", "Other"].map(function (name) {
+        const group = groups[name];
+        if (!group || !group.length) return "";
+        group.sort(comparator);
+        return `
+            <div class="regular-task-group">
+                <div class="regular-task-group-header">
+                    <h2>${escapeHtml(name)}</h2>
+                    <span>${group.length} task${group.length === 1 ? "" : "s"}</span>
+                </div>
+                <div class="regular-task-list">${group.map(createRegularTaskCard).join("")}</div>
+            </div>
+        `;
+    }).join("");
+
+}
+
+function renderRegularTasks() {
+
+    const container = document.getElementById("regularTasksContainer");
+    if (!container) return;
+
+    if (!regularTasks.length) {
+        container.innerHTML = dataEverLoaded
+            ? `<div class="regular-tasks-empty">No regular tasks for you yet.</div>`
+            : `<div class="skeleton-card-grid">${skeletonCards(4)}</div>`;
+        return;
     }
 
-    if (hasPrimaryDepartment && primaryDeptItems.length) {
-        sections.push({ title: primaryDepartment + " Tasks", tasks: primaryDeptItems });
+    if (isPrivilegedUser()) {
+
+        const filter = getInput("regularTasksDepartmentFilter");
+        const scoped = filter ? regularTasks.filter(function (t) { return String(t.department || "").trim() === filter; }) : regularTasks;
+
+        if (!scoped.length) {
+            container.innerHTML = `<div class="regular-tasks-empty">No regular tasks in ${escapeHtml(filter)} yet.</div>`;
+            return;
+        }
+
+        const mine = scoped.filter(function (t) { return currentUserMatches(t.assignedTo); });
+        const rest = scoped.filter(function (t) { return !currentUserMatches(t.assignedTo); });
+
+        container.innerHTML =
+            (mine.length ? `<div class="section-block"><div class="grid-section-header"><span>My Regular Tasks</span><span class="table-section-count">${mine.length}</span></div>${regularGroupsHtml(mine)}</div>` : "") +
+            (rest.length ? `<div class="section-block"><div class="grid-section-header"><span>${mine.length ? "Everyone Else" : "All Regular Tasks"}</span><span class="table-section-count">${rest.length}</span></div>${regularGroupsHtml(rest)}</div>` : "");
+        return;
+
     }
 
-    if (otherItems.length) {
-        sections.push({
-            title: (hasPrimaryDepartment || mine.length)
-                ? "Other Departments You Have Access To"
-                : "All Tasks",
-            tasks: otherItems
-        });
+    const sections = buildSections(regularTasks, {
+        dateField: "expectedDate",
+        mineEmptyText: "No regular tasks are assigned to you."
+    });
+
+    container.innerHTML = sections.map(function (section) {
+
+        const expanded = isSectionExpanded("regular", section);
+        const title = section.key === "mine" ? "My Regular Tasks" : section.title;
+
+        const header = `
+            <div class="grid-section-header${section.collapsible ? " grid-section-header-collapsible" : ""}">
+                <span>${escapeHtml(title)}</span>
+                <span class="table-section-count">${section.items.length}</span>
+                ${section.collapsible ? sectionToggleButton("regular", section, expanded) : ""}
+            </div>
+        `;
+
+        if (!expanded) return `<div class="section-block">${header}</div>`;
+
+        const body = section.items.length
+            ? regularGroupsHtml(section.items)
+            : `<div class="regular-tasks-empty">${escapeHtml(section.emptyText)}</div>`;
+
+        return `<div class="section-block${section.collapsible ? " section-block-others" : ""}">${header}${body}</div>`;
+
+    }).join("");
+
+}
+
+function createRegularTaskCard(task) {
+
+    const id = String(task.regularTaskId || "").trim();
+    const expectedDate = String(task.expectedDate || "").trim();
+    const dueSoon = isDueSoon(task, "expectedDate");
+
+    return `
+        <div class="regular-task-card${dueSoon ? " card-due-soon" : ""}" data-regular-task-id="${escapeHtml(id)}">
+            <div class="regular-task-card-main">
+                <div class="regular-task-id">${escapeHtml(id)}</div>
+                <h3>${escapeHtml(task.task)}</h3>
+                <div class="regular-task-details">
+                    ${task.department ? `<span>Department: ${escapeHtml(task.department)}</span>` : ""}
+                    <span class="regular-task-owners">Owners: ${ownersDisplay(task.assignedTo)}</span>
+                    ${task.priority ? `<span>Priority: ${escapeHtml(task.priority)}</span>` : ""}
+                    ${task.expectedTime ? `<span>Expected: ${escapeHtml(task.expectedTime)}</span>` : ""}
+                    ${expectedDate ? `<span>Expected Date: ${displayDate(expectedDate)}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</span>` : ""}
+                </div>
+            </div>
+            <div class="regular-task-card-actions">
+                <button type="button" class="regular-task-checklist-button" data-regular-task-id="${escapeHtml(id)}">
+                    ${checklistStatusDot(id)} Checklist
+                </button>
+                <button type="button" class="regular-task-update-button" data-regular-task-id="${escapeHtml(id)}">Update</button>
+            </div>
+        </div>
+    `;
+
+}
+
+function findRegularTask(regularTaskId) {
+    return regularTasks.find(function (item) {
+        return String(item.regularTaskId || "").trim() === String(regularTaskId || "").trim();
+    });
+}
+
+function openRegularTaskUpdate(regularTaskId) {
+
+    const task = findRegularTask(regularTaskId);
+    if (!task) return showNotification("Error", "Regular task could not be found.");
+
+    const modal = document.getElementById("regularTaskUpdateModal");
+    if (!modal) return;
+
+    setText("regularTaskUpdateTaskName", task.task || "Regular Task");
+    setText("regularTaskUpdateTaskId", task.regularTaskId || "-");
+    setText("regularTaskUpdateDepartment", task.department || "-");
+    setText("regularTaskUpdateExpectedTime", task.expectedTime || "-");
+
+    const form = document.getElementById("regularTaskUpdateForm");
+    if (form) form.dataset.regularTaskId = task.regularTaskId || "";
+
+    setInput("regularTaskStatus", "");
+    setInput("regularTaskDescription", "");
+
+    const error = document.getElementById("regularTaskUpdateError");
+    if (error) { error.textContent = ""; error.style.display = "none"; }
+
+    modal.style.display = "flex";
+    document.body.classList.add("modal-open");
+
+}
+
+function closeRegularTaskUpdate() {
+    const modal = document.getElementById("regularTaskUpdateModal");
+    if (modal && modal.style.display !== "none") {
+        modal.style.display = "none";
+        document.body.classList.remove("modal-open");
     }
+}
 
-    return sections;
+function initializeRegularTaskUpdateForm() {
+
+    const form = document.getElementById("regularTaskUpdateForm");
+    if (!form) return;
+
+    form.addEventListener("submit", async function (event) {
+
+        event.preventDefault();
+
+        const regularTaskId = String(form.dataset.regularTaskId || "").trim();
+        const status = getInput("regularTaskStatus");
+        const description = getInput("regularTaskDescription").trim();
+        const error = document.getElementById("regularTaskUpdateError");
+
+        const fail = function (message) {
+            if (error) { error.textContent = message; error.style.display = "block"; }
+        };
+
+        if (!regularTaskId) return fail("Regular Task ID is missing.");
+        if (status !== "Completed" && status !== "Pending") return fail("Select Completed or Pending.");
+        if (!description) return fail("Describe what was done.");
+
+        const guardKey = "regularTaskUpdate-" + regularTaskId;
+        if (isRequestActive(guardKey)) return;
+
+        const button = document.getElementById("saveRegularTaskUpdateButton");
+        setButtonLoading(button, true);
+
+        try {
+
+            let result = null;
+            await guardAsync(guardKey, async function () {
+                result = await apiRequest("saveRegularTaskUpdate", { regularTaskId: regularTaskId, status: status, description: description });
+            });
+
+            if (!result || !result.success) return fail(result?.message || "Couldn't save the update. Try again.");
+
+            closeRegularTaskUpdate();
+            showNotification("Updated", "Regular task update saved.");
+
+        }
+        finally {
+            setButtonLoading(button, false);
+        }
+
+    });
 
 }
 
-/* Flat version of the same grouping — mine, then primary department,
-   then other departments, each internally sorted — but returned as a
-   single ordered array instead of titled sections. Used inside
-   Regular Tasks, which already has its own frequency group headers
-   (Daily/Weekly/...), so a second layer of section headers there
-   would be one too many. */
-function orderByRelevance(sourceItems, options) {
+function openRegularTaskChecklistDrawer(regularTaskId) {
 
-    return buildRelevanceSections(sourceItems, options)
-        .reduce(function(all, section) { return all.concat(section.tasks); }, []);
+    const task = findRegularTask(regularTaskId);
+    if (!task) return showNotification("Error", "Regular task could not be found.");
+
+    regularTaskChecklistCurrentId = task.regularTaskId;
+
+    setText("regularTaskChecklistTitle", task.task || "Regular Task");
+    setText("regularTaskChecklistDepartment", task.department || "-");
+    setText("regularTaskChecklistExpectedTime", task.expectedTime || "-");
+
+    refreshRegularTaskChecklistDrawer();
+
+    document.getElementById("regularTaskChecklistDrawer").style.display = "block";
+    document.body.classList.add("modal-open");
 
 }
 
-/* Back-compat alias: the All Tasks page originally called this
-   directly with Master Task objects (dueDate). */
-function buildTaskSections(sourceTasks) {
-    return buildRelevanceSections(sourceTasks, { dateField: "dueDate" });
+function refreshRegularTaskChecklistDrawer() {
+
+    if (!regularTaskChecklistCurrentId) return;
+
+    const id = regularTaskChecklistCurrentId;
+
+    renderChecklistInto(id,
+        document.getElementById("regularTaskChecklistList"),
+        document.getElementById("regularTaskChecklistForm"),
+        document.getElementById("regularTaskChecklistInput"),
+        { canAdd: true, canDelete: isPrivilegedUser(), progressElement: document.getElementById("regularTaskChecklistProgress") });
+
 }
 
-/* ---------------------------------------------------------------------
-   CHECKLISTS  (entityKey e.g. "task:T004", "bookfair:T011")
---------------------------------------------------------------------- */
-
-function idFromEntityKey(entityKey) {
-    const parts = String(entityKey || "").split(":");
-    return parts.length > 1 ? parts.slice(1).join(":") : entityKey;
-}
-
-function getChecklist(entityKey) {
-    return allChecklists[idFromEntityKey(entityKey)] || [];
-}
-
-function checklistStatusDot(entityKey) {
-
-    const items = getChecklist(entityKey);
-
-    if (!items.length) {
-        return `<span class="checklist-dot checklist-dot-red" title="No checklist yet"></span>`;
+function closeRegularTaskChecklistDrawer() {
+    const drawer = document.getElementById("regularTaskChecklistDrawer");
+    if (drawer && drawer.style.display !== "none") {
+        drawer.style.display = "none";
+        document.body.classList.remove("modal-open");
+        regularTaskChecklistCurrentId = "";
+        if (currentPage === "regularTasks") renderRegularTasks();
     }
+}
 
-    const allDone = items.every(function(item) { return String(item.status).toLowerCase() === "completed"; });
+/* =========================================================
+   CHECKLISTS
+   Ticks / adds / deletes show instantly and save in the
+   background; if the save fails the change is undone and a
+   message is shown. The server sends back the task's full,
+   fresh checklist with every reply, so no second request.
+========================================================= */
 
-    if (allDone) {
-        return `<span class="checklist-dot checklist-dot-green" title="Checklist complete"></span>`;
-    }
+function getChecklist(taskId) {
+    return allChecklists[String(taskId)] || [];
+}
 
-    return `<span class="checklist-dot checklist-dot-red" title="Checklist pending"></span>`;
+function checklistStatusDot(taskId) {
+
+    const items = getChecklist(taskId);
+
+    if (!items.length) return `<span class="checklist-dot checklist-dot-red" title="No checklist yet"></span>`;
+
+    const done = items.filter(function (i) { return String(i.status).toLowerCase() === "completed"; }).length;
+
+    if (done === items.length) return `<span class="checklist-dot checklist-dot-green" title="Checklist complete"></span>`;
+
+    return `<span class="checklist-dot checklist-dot-red" title="${done}/${items.length} done"></span>`;
 
 }
 
-async function addChecklistItem(entityKey, text) {
+function updateChecklistProgressLabel(taskId, element) {
+    if (!element) return;
+    const items = getChecklist(taskId);
+    const done = items.filter(function (i) { return String(i.status).toLowerCase() === "completed"; }).length;
+    element.textContent = done + "/" + items.length;
+}
+
+/* Re-renders every place a checklist might currently be showing. */
+function onChecklistChanged() {
+    persistLocalCacheSoon();
+    if (taskDetailCurrentId) renderTaskDetailChecklist();
+    if (regularTaskChecklistCurrentId) refreshRegularTaskChecklistDrawer();
+    if (currentPage === "bookFair") refreshBookFairChecklists();
+    if (currentPage === "tasks") renderTasksTable();
+    if (currentPage === "department" && currentDepartment) showDepartmentPage(currentDepartment);
+}
+
+async function addChecklistItem(taskId, text) {
 
     const trimmed = String(text || "").trim();
     if (!trimmed) return;
 
-    const taskId = idFromEntityKey(entityKey);
+    const key = String(taskId);
+    const temp = { checklistId: tempId("cl"), taskId: key, item: trimmed, status: "Pending", pending: true };
 
-    await apiRequest("addChecklistItem", {
-        taskId: taskId,
-        item: trimmed,
-        updatedBy: currentUserLabel()
-    });
+    allChecklists[key] = getChecklist(key).concat([temp]);
+    onChecklistChanged();
 
-    await loadChecklistsForTask(taskId);
+    const result = await apiRequest("addChecklistItem", { taskId: key, item: trimmed });
 
-}
+    if (result && result.success && Array.isArray(result.checklists)) {
+        allChecklists[key] = result.checklists;
+    } else {
+        allChecklists[key] = getChecklist(key).filter(function (i) { return i.checklistId !== temp.checklistId; });
+        showNotification("Not saved", result?.message || "Couldn't add the checklist item.");
+    }
 
-async function toggleChecklistItem(entityKey, itemId) {
-
-    const item = getChecklist(entityKey).find(function(i) { return i.checklistId === itemId; });
-    if (!item) return;
-
-    const newStatus = String(item.status).toLowerCase() === "completed" ? "Pending" : "Completed";
-
-    await apiRequest("updateChecklistStatus", {
-        checklistId: itemId,
-        status: newStatus,
-        updatedBy: currentUserLabel()
-    });
-
-    await loadChecklistsForTask(idFromEntityKey(entityKey));
+    onChecklistChanged();
 
 }
 
-async function removeChecklistItem(entityKey, itemId) {
+async function toggleChecklistItem(taskId, itemId) {
 
-    // Belt-and-suspenders: the UI already hides the remove button for
-    // non-privileged users (see canDelete / isPrivilegedUser() at the
-    // call sites of renderChecklistInto), but this function itself is
-    // also guarded so a direct call can't bypass that. The role is
-    // sent to the backend too, which is the check that actually can't
-    // be bypassed from the browser.
+    const key = String(taskId);
+    const item = getChecklist(key).find(function (i) { return i.checklistId === itemId; });
+    if (!item || item.pending) return;
+
+    const previous = item.status;
+    const next = String(previous).toLowerCase() === "completed" ? "Pending" : "Completed";
+
+    item.status = next;
+    item.pending = true;
+    onChecklistChanged();
+
+    const result = await apiRequest("updateChecklistStatus", { checklistId: itemId, status: next });
+
+    if (result && result.success && Array.isArray(result.checklists)) {
+        allChecklists[key] = result.checklists;
+    } else {
+        item.status = previous;
+        item.pending = false;
+        showNotification("Not saved", result?.message || "Couldn't update the checklist item.");
+    }
+
+    onChecklistChanged();
+
+}
+
+async function removeChecklistItem(taskId, itemId) {
+
     if (!isPrivilegedUser()) {
-        showNotification("Not Allowed", "Only the Founder or Operations Head can delete checklist items.");
-        return;
+        return showNotification("Not allowed", "Only the Founder or Operations Head can delete checklist items.");
     }
 
-    const result = await apiRequest("deleteChecklistItem", {
-        checklistId: itemId,
-        role: currentUser?.role || "",
-        updatedBy: currentUserLabel()
-    });
+    const key = String(taskId);
+    const before = getChecklist(key).slice();
+    const item = before.find(function (i) { return i.checklistId === itemId; });
+    if (!item || item.pending) return;
 
-    if (!result || !result.success) {
-        showNotification("Error", (result && result.message) || "Unable to delete checklist item.");
-        return;
+    allChecklists[key] = before.filter(function (i) { return i.checklistId !== itemId; });
+    onChecklistChanged();
+
+    const result = await apiRequest("deleteChecklistItem", { checklistId: itemId });
+
+    if (result && result.success && Array.isArray(result.checklists)) {
+        allChecklists[key] = result.checklists;
+    } else {
+        allChecklists[key] = before;
+        showNotification("Not deleted", result?.message || "Couldn't delete the checklist item.");
     }
 
-    await loadChecklistsForTask(idFromEntityKey(entityKey));
+    onChecklistChanged();
 
 }
 
-/* Renders a checklist into any container, wiring up add/toggle/remove.
-   `canAdd` controls whether new items can be added — anyone with access
-   to the checklist can add. `canDelete` controls whether the remove (×)
-   button appears — restricted to Founder / Operations Head, so regular
-   users can contribute items but can't delete someone else's. Toggling
-   an item's done status is allowed for anyone who can see the checklist. */
-function renderChecklistInto(entityKey, listElement, formElement, inputElement, canAdd, canDelete, onChange) {
+/* Draws a checklist and wires its events once. The element remembers
+   WHICH task it is showing (fixes a bug where adding an item in the
+   drawer could land on the first task you ever opened). */
+function renderChecklistInto(taskId, listElement, formElement, inputElement, options = {}) {
 
     if (!listElement) return;
 
-    const items = getChecklist(entityKey);
+    const key = String(taskId);
+    const items = getChecklist(key);
 
-    if (!items.length) {
-        listElement.innerHTML = `<div class="checklist-empty">No checklist items yet.</div>`;
-    } else {
+    listElement.dataset.taskId = key;
+    listElement.dataset.canDelete = options.canDelete ? "1" : "";
 
-        listElement.innerHTML = items.map(function(item) {
-
+    listElement.innerHTML = items.length
+        ? items.map(function (item) {
             const done = String(item.status).toLowerCase() === "completed";
-
             return `
-                <div class="checklist-item ${done ? "is-done" : ""}" data-item-id="${escapeHtml(item.checklistId)}">
-                    <input type="checkbox" ${done ? "checked" : ""} class="checklist-item-checkbox">
+                <div class="checklist-item${done ? " is-done" : ""}${item.pending ? " is-pending" : ""}" data-item-id="${escapeHtml(item.checklistId)}">
+                    <input type="checkbox" class="checklist-item-checkbox" ${done ? "checked" : ""} ${item.pending ? "disabled" : ""} aria-label="Mark done">
                     <span class="checklist-item-text">${escapeHtml(item.item)}</span>
-                    ${canDelete ? `<button type="button" class="checklist-item-remove" aria-label="Remove item">×</button>` : ""}
+                    ${options.canDelete && !item.pending ? `<button type="button" class="checklist-item-remove" aria-label="Delete item">×</button>` : ""}
                 </div>
             `;
-        }).join("");
+        }).join("")
+        : `<div class="checklist-empty">No checklist items yet.</div>`;
 
-        listElement.querySelectorAll(".checklist-item-checkbox").forEach(function(checkbox) {
-            checkbox.addEventListener("change", async function() {
+    if (!listElement.dataset.wired) {
 
-                const itemId = checkbox.closest(".checklist-item").dataset.itemId;
-                const guardKey = "checklist-toggle-" + itemId;
+        listElement.dataset.wired = "1";
 
-                if (isRequestActive(guardKey)) {
-                    checkbox.checked = !checkbox.checked; // revert the click, ignore
-                    return;
-                }
-
-                checkbox.disabled = true;
-
-                await guardAsync(guardKey, async function() {
-                    await toggleChecklistItem(entityKey, itemId);
-                });
-
-                if (onChange) onChange();
-
-            });
+        listElement.addEventListener("change", function (event) {
+            if (!event.target.classList.contains("checklist-item-checkbox")) return;
+            const itemId = event.target.closest(".checklist-item")?.dataset.itemId;
+            if (itemId) toggleChecklistItem(listElement.dataset.taskId, itemId);
         });
 
-        if (canDelete) {
-            listElement.querySelectorAll(".checklist-item-remove").forEach(function(button) {
-                button.addEventListener("click", async function() {
-
-                    const itemId = button.closest(".checklist-item").dataset.itemId;
-                    const guardKey = "checklist-remove-" + itemId;
-
-                    if (isRequestActive(guardKey)) return;
-
-                    button.disabled = true;
-
-                    await guardAsync(guardKey, async function() {
-                        await removeChecklistItem(entityKey, itemId);
-                    });
-
-                    if (onChange) onChange();
-
-                });
-            });
-        }
-
-    }
-
-    if (formElement && !formElement.dataset.wired) {
-
-        formElement.dataset.wired = "true";
-
-        formElement.addEventListener("submit", async function(event) {
-
-            event.preventDefault();
-
-            const value = inputElement.value.trim();
-            if (!value) return;
-
-            const guardKey = "checklist-add-" + entityKey;
-            if (isRequestActive(guardKey)) return;
-
-            const submitButton = formElement.querySelector("button[type='submit']");
-            setButtonLoading(submitButton, true);
-
-            await guardAsync(guardKey, async function() {
-                await addChecklistItem(entityKey, value);
-            });
-
-            inputElement.value = "";
-            setButtonLoading(submitButton, false);
-
-            if (onChange) onChange();
-
+        listElement.addEventListener("click", function (event) {
+            const remove = event.target.closest(".checklist-item-remove");
+            if (!remove || !listElement.dataset.canDelete) return;
+            const itemId = remove.closest(".checklist-item")?.dataset.itemId;
+            if (itemId && confirm("Delete this checklist item?")) removeChecklistItem(listElement.dataset.taskId, itemId);
         });
 
     }
 
     if (formElement) {
-        formElement.style.display = canAdd ? "flex" : "none";
+
+        formElement.dataset.taskId = key;
+        formElement.style.display = options.canAdd === false ? "none" : "flex";
+
+        if (!formElement.dataset.wired) {
+            formElement.dataset.wired = "1";
+            formElement.addEventListener("submit", function (event) {
+                event.preventDefault();
+                const value = inputElement.value.trim();
+                if (!value) return;
+                inputElement.value = "";
+                addChecklistItem(formElement.dataset.taskId, value);
+                inputElement.focus();
+            });
+        }
+
     }
 
+    updateChecklistProgressLabel(key, options.progressElement);
+
 }
 
-/* ---------------------------------------------------------------------
-   COMMENTS  (entityKey e.g. "task:T004", "backlog:BL003")
---------------------------------------------------------------------- */
+/* =========================================================
+   COMMENTS (instant, saved in background)
+========================================================= */
 
-function getComments(entityKey) {
-    return allComments[idFromEntityKey(entityKey)] || [];
+function getComments(taskId) {
+    return allComments[String(taskId)] || [];
 }
 
-async function addComment(entityKey, text) {
+async function addComment(taskId, text, rerender) {
 
     const trimmed = String(text || "").trim();
     if (!trimmed) return;
 
-    const taskId = idFromEntityKey(entityKey);
+    const key = String(taskId);
+    const temp = { commentId: tempId("com"), taskId: key, comment: trimmed, user: currentUserLabel(), date: "", time: "Sending…", pending: true };
 
-    await apiRequest("addTaskComment", {
-        taskId: taskId,
-        comment: trimmed,
-        updatedBy: currentUserLabel()
-    });
+    allComments[key] = getComments(key).concat([temp]);
+    rerender();
 
-    await loadCommentsForTask(taskId);
+    const result = await apiRequest("addTaskComment", { taskId: key, comment: trimmed });
 
-}
-
-function formatCommentDate(comment) {
-
-    if (comment.date && comment.time) {
-        return comment.date + " · " + comment.time;
+    if (result && result.success && Array.isArray(result.comments)) {
+        allComments[key] = result.comments;
+    } else {
+        allComments[key] = getComments(key).filter(function (c) { return c.commentId !== temp.commentId; });
+        showNotification("Not posted", result?.message || "Couldn't post the comment.");
+        return trimmed; // give the text back so it isn't lost
     }
 
-    return comment.date || "";
+    persistLocalCacheSoon();
+    rerender();
 
 }
 
-function renderCommentsInto(entityKey, threadElement) {
+function renderCommentsInto(taskId, threadElement) {
 
     if (!threadElement) return;
 
-    const comments = getComments(entityKey);
+    const comments = getComments(taskId);
 
     if (!comments.length) {
-        threadElement.innerHTML = `<div class="comment-empty">No comments yet — be the first to add one.</div>`;
+        threadElement.innerHTML = `<div class="comment-empty">No comments yet — add the first one.</div>`;
         return;
     }
 
-    threadElement.innerHTML = comments.map(function(comment) {
+    threadElement.innerHTML = comments.map(function (c) {
+        const when = c.pending ? "Sending…" : [displayDateSafe(c.date), c.time].filter(Boolean).join(" · ");
         return `
-            <div class="comment-bubble">
+            <div class="comment-bubble${c.pending ? " is-pending" : ""}">
                 <div class="comment-bubble-head">
-                    <span class="comment-bubble-author">${escapeHtml(comment.user)}</span>
-                    <span class="comment-bubble-date">${escapeHtml(formatCommentDate(comment))}</span>
+                    <span class="comment-bubble-author">${escapeHtml(c.user)}</span>
+                    <span class="comment-bubble-date">${escapeHtml(when)}</span>
                 </div>
-                <div class="comment-bubble-text">${escapeHtml(comment.comment)}</div>
+                <div class="comment-bubble-text">${escapeHtml(c.comment)}</div>
             </div>
         `;
     }).join("");
@@ -3326,169 +2661,151 @@ function renderCommentsInto(entityKey, threadElement) {
 
 }
 
-/* =========================================================================
-   TASK DETAIL DRAWER  (All Tasks / Master Tasks / Book Fair cards)
-========================================================================= */
+function displayDateSafe(value) {
+    return value ? displayDate(value) : "";
+}
 
-function initializeTaskDetailDrawer() {
+function wireCommentForm(formId, inputId, getTaskId, rerender) {
 
-    const checklistForm = document.getElementById("taskDetailChecklistForm");
-    const checklistInput = document.getElementById("taskDetailChecklistInput");
-    const checklistList = document.getElementById("taskDetailChecklistList");
-    const progress = document.getElementById("taskDetailChecklistProgress");
+    const form = document.getElementById(formId);
+    const input = document.getElementById(inputId);
+    if (!form || !input) return;
 
-    const refreshChecklist = function() {
+    form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        const taskId = getTaskId();
+        const value = input.value.trim();
+        if (!taskId || !value) return;
+        input.value = "";
+        const unsent = await addComment(taskId, value, rerender);
+        if (unsent && !input.value) input.value = unsent;
+    });
 
-        if (!taskDetailCurrentId) return;
-
-        const entityKey = "task:" + taskDetailCurrentId;
-
-        renderChecklistInto(entityKey, checklistList, checklistForm, checklistInput, true, isPrivilegedUser(), function() {
-            refreshChecklist();
-            updateChecklistProgressLabel(entityKey, progress);
-        });
-
-        updateChecklistProgressLabel(entityKey, progress);
-
-        renderTasksTable();
-        if (currentDepartment) renderDepartmentTasks(tasks.filter(function(t) { return t.department === currentDepartment; }));
-        renderBookFair();
-
-    };
-
-    taskDetailRefreshChecklist = refreshChecklist;
-
-    const commentForm = document.getElementById("taskDetailCommentForm");
-    const commentInput = document.getElementById("taskDetailCommentInput");
-
-       if (commentForm) {
-        commentForm.addEventListener("submit", async function(event) {
-
-            event.preventDefault();
-            if (!taskDetailCurrentId) return;
-
-            const value = commentInput.value.trim();
-            if (!value) return;
-
-            const guardKey = "comment-task-" + taskDetailCurrentId;
-            if (isRequestActive(guardKey)) return;
-
-            const submitButton = commentForm.querySelector("button[type='submit']");
-            setButtonLoading(submitButton, true);
-
-            await guardAsync(guardKey, async function() {
-                await addComment("task:" + taskDetailCurrentId, value);
-            });
-
-            commentInput.value = "";
-            setButtonLoading(submitButton, false);
-
-            renderCommentsInto("task:" + taskDetailCurrentId, document.getElementById("taskDetailComments"));
-
-        });
-    }
-    const statusSelect = document.getElementById("taskDetailStatus");
-
-    if (statusSelect) {
-        statusSelect.addEventListener("change", async function() {
-
-            if (!taskDetailCurrentId) return;
-
-            const task = tasks.find(function(t) { return t.taskId === taskDetailCurrentId; });
-            if (!task) return;
-
-            const updated = Object.assign({}, task, { status: statusSelect.value, updatedBy: currentUser?.name || currentUser?.username || "" });
-
-            const result = await apiRequest("updateTask", { task: { taskId: updated.taskId, status: updated.status, updatedBy: updated.updatedBy } });
-
-            if (result && result.success) {
-                showNotification("Updated", "Task status updated.");
-                upsertLocalTask(result.task);
-            } else {
-                showNotification("Error", result?.message || "Unable to update status.");
-            }
-
-        });
-    }
-
-    const saveMetaButton = document.getElementById("taskDetailSaveMetaButton");
-
-    if (saveMetaButton) {
-        saveMetaButton.addEventListener("click", async function() {
-
-            if (!taskDetailCurrentId) return;
-
-            const payload = {
-                taskId: taskDetailCurrentId,
-                assignedTo: document.getElementById("taskDetailAssignedTo").value,
-                priority: document.getElementById("taskDetailPriority").value,
-                dueDate: document.getElementById("taskDetailDueDate").value,
-                followupDate: document.getElementById("taskDetailFollowupDate").value,
-                updatedBy: currentUser?.name || currentUser?.username || ""
-            };
-
-            saveMetaButton.disabled = true;
-            saveMetaButton.textContent = "Saving...";
-
-            const result = await apiRequest("updateTask", { task: payload });
-
-            saveMetaButton.disabled = false;
-            saveMetaButton.textContent = "Save Changes";
-
-            if (result && result.success) {
-                showNotification("Saved", "Task details updated.");
-                upsertLocalTask(result.task);
-            } else {
-                showNotification("Error", result?.message || "Unable to save changes.");
-            }
-
-        });
-    }
-
-    const descriptionField = document.getElementById("taskDetailDescription");
-
-    if (descriptionField) {
-        descriptionField.addEventListener("blur", async function() {
-
-            if (!taskDetailCurrentId || !isPrivilegedUser()) return;
-
-            const task = tasks.find(function(t) { return t.taskId === taskDetailCurrentId; });
-            if (!task || task.description === descriptionField.value) return;
-
-            const result = await apiRequest("updateTask", { task: { taskId: taskDetailCurrentId, description: descriptionField.value, updatedBy: currentUser?.name || currentUser?.username || "" } });
-
-            if (result && result.success) {
-                upsertLocalTask(result.task);
-            }
-
-        });
-    }
+    input.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) form.requestSubmit();
+    });
 
 }
 
-let taskDetailRefreshChecklist = function() {};
+/* =========================================================
+   TASK DETAIL DRAWER
+========================================================= */
 
-function updateChecklistProgressLabel(entityKey, progressElement) {
+function renderTaskDetailChecklist() {
+    if (!taskDetailCurrentId) return;
+    renderChecklistInto(taskDetailCurrentId,
+        document.getElementById("taskDetailChecklistList"),
+        document.getElementById("taskDetailChecklistForm"),
+        document.getElementById("taskDetailChecklistInput"),
+        { canAdd: true, canDelete: isPrivilegedUser(), progressElement: document.getElementById("taskDetailChecklistProgress") });
+}
 
-    if (!progressElement) return;
+function initializeTaskDetailDrawer() {
 
-    const items = getChecklist(entityKey);
-    const done = items.filter(function(item) { return String(item.status).toLowerCase() === "completed"; }).length;
+    wireCommentForm("taskDetailCommentForm", "taskDetailCommentInput",
+        function () { return taskDetailCurrentId; },
+        function () { renderCommentsInto(taskDetailCurrentId, document.getElementById("taskDetailComments")); });
 
-    progressElement.textContent = done + "/" + items.length;
+    // Status: anyone who can see the task. Updates instantly, reverts on failure.
+    const statusSelect = document.getElementById("taskDetailStatus");
+
+    statusSelect?.addEventListener("change", async function () {
+
+        const task = tasks.find(function (t) { return t.taskId === taskDetailCurrentId; });
+        if (!task) return;
+
+        const previous = task.status;
+        const next = statusSelect.value;
+        if (previous === next) return;
+
+        task.status = next;
+        renderCurrentPage();
+
+        const result = await apiRequest("updateTaskStatus", { taskId: task.taskId, status: next });
+
+        if (result && result.success) {
+            upsertLocalTask(result.task);
+            showNotification("Updated", `Status set to ${next}.`);
+        } else {
+            task.status = previous;
+            if (taskDetailCurrentId === task.taskId) statusSelect.value = previous;
+            renderCurrentPage();
+            showNotification("Not saved", result?.message || "Couldn't update the status.");
+        }
+
+    });
+
+    // Owners / priority / dates: Founder & Operations Head only.
+    const saveMetaButton = document.getElementById("taskDetailSaveMetaButton");
+
+    saveMetaButton?.addEventListener("click", async function () {
+
+        if (!taskDetailCurrentId) return;
+
+        const assignedTo = taskDetailOwnerPicker ? taskDetailOwnerPicker.getValue() : "";
+        if (!assignedTo) return showNotification("Missing owner", "Choose at least one owner.");
+
+        setButtonLoading(saveMetaButton, true);
+
+        const result = await apiRequest("updateTask", {
+            task: {
+                taskId: taskDetailCurrentId,
+                assignedTo: assignedTo,
+                priority: getInput("taskDetailPriority"),
+                dueDate: getInput("taskDetailDueDate"),
+                followupDate: getInput("taskDetailFollowupDate")
+            }
+        });
+
+        setButtonLoading(saveMetaButton, false);
+
+        if (result && result.success) {
+            showNotification("Saved", "Task details updated.");
+            upsertLocalTask(result.task);
+        } else {
+            showNotification("Not saved", result?.message || "Couldn't save the changes.");
+        }
+
+    });
+
+    const descriptionField = document.getElementById("taskDetailDescription");
+
+    descriptionField?.addEventListener("blur", async function () {
+
+        if (!taskDetailCurrentId || !isPrivilegedUser()) return;
+
+        const task = tasks.find(function (t) { return t.taskId === taskDetailCurrentId; });
+        if (!task || task.description === descriptionField.value) return;
+
+        const previous = task.description;
+        task.description = descriptionField.value;
+
+        const result = await apiRequest("updateTask", { task: { taskId: task.taskId, description: descriptionField.value } });
+
+        if (result && result.success) upsertLocalTask(result.task);
+        else {
+            task.description = previous;
+            showNotification("Not saved", result?.message || "Couldn't save the description.");
+        }
+
+    });
 
 }
 
 function openTaskDetailDrawer(taskId) {
 
-    const task = tasks.find(function(t) { return t.taskId === taskId; });
-
-    if (!task) {
-        showNotification("Error", "Task not found.");
-        return;
-    }
+    const task = tasks.find(function (t) { return t.taskId === taskId; });
+    if (!task) return showNotification("Error", "Task not found.");
 
     taskDetailCurrentId = taskId;
+    fillTaskDetailDrawer(task);
+
+    document.getElementById("taskDetailDrawer").style.display = "block";
+    document.body.classList.add("modal-open");
+
+}
+
+function fillTaskDetailDrawer(task) {
 
     const privileged = isPrivilegedUser();
 
@@ -3496,45 +2813,29 @@ function openTaskDetailDrawer(taskId) {
     setInput("taskDetailDescription", task.description);
     setInput("taskDetailId", task.taskId);
     setInput("taskDetailDepartment", task.department);
-    setInput("taskDetailAssignedTo", task.assignedTo);
     setInput("taskDetailPriority", task.priority);
     setInput("taskDetailStatus", task.status);
     setInput("taskDetailCreatedDate", task.createdDate);
     setInput("taskDetailDueDate", task.dueDate);
     setInput("taskDetailFollowupDate", task.followupDate);
 
-    ["taskDetailAssignedTo", "taskDetailPriority", "taskDetailDueDate", "taskDetailFollowupDate"].forEach(function(id) {
+    if (taskDetailOwnerPicker) {
+        taskDetailOwnerPicker.setValue(task.assignedTo);
+        taskDetailOwnerPicker.setDisabled(!privileged);
+    }
+
+    ["taskDetailPriority", "taskDetailDueDate", "taskDetailFollowupDate", "taskDetailDescription"].forEach(function (id) {
         const element = document.getElementById(id);
         if (element) element.disabled = !privileged;
     });
 
-    const description = document.getElementById("taskDetailDescription");
-    if (description) description.disabled = !privileged;
-
     const saveMetaButton = document.getElementById("taskDetailSaveMetaButton");
     const lockedNote = document.getElementById("taskDetailLockedNote");
-
     if (saveMetaButton) saveMetaButton.style.display = privileged ? "block" : "none";
     if (lockedNote) lockedNote.style.display = privileged ? "none" : "block";
 
-    const entityKey = "task:" + taskId;
-
-    renderChecklistInto(
-        entityKey,
-        document.getElementById("taskDetailChecklistList"),
-        document.getElementById("taskDetailChecklistForm"),
-        document.getElementById("taskDetailChecklistInput"),
-        true,
-        privileged,
-        taskDetailRefreshChecklist
-    );
-
-    updateChecklistProgressLabel(entityKey, document.getElementById("taskDetailChecklistProgress"));
-    renderCommentsInto(entityKey, document.getElementById("taskDetailComments"));
-
-    const drawer = document.getElementById("taskDetailDrawer");
-    if (drawer) drawer.style.display = "block";
-    document.body.classList.add("modal-open");
+    renderTaskDetailChecklist();
+    renderCommentsInto(task.taskId, document.getElementById("taskDetailComments"));
 
 }
 
@@ -3544,90 +2845,75 @@ function closeTaskDetailDrawer() {
     if (drawer) drawer.style.display = "none";
 
     document.body.classList.remove("modal-open");
+    taskDetailOwnerPicker?.close();
     taskDetailCurrentId = "";
 
-    renderTasksTable();
-    renderBookFair();
+    renderCurrentPage();
 
 }
 
-/* =========================================================================
+/* After a background refresh, update any drawer that's open
+   (without touching fields the person may be editing). */
+function refreshOpenDrawers() {
+
+    if (taskDetailCurrentId) {
+        renderTaskDetailChecklist();
+        renderCommentsInto(taskDetailCurrentId, document.getElementById("taskDetailComments"));
+    }
+
+    if (regularTaskChecklistCurrentId) refreshRegularTaskChecklistDrawer();
+
+    if (backlogDetailCurrentId) {
+        renderCommentsInto(backlogDetailCurrentId, document.getElementById("backlogDetailComments"));
+    }
+
+}
+
+/* =========================================================
    BACKLOG
-========================================================================= */
+========================================================= */
 
 function initializeBacklog() {
 
-    const addButton = document.getElementById("backlogAddButton");
+    document.getElementById("backlogAddButton")?.addEventListener("click", function () { openBacklogItemModal(); });
+    document.getElementById("backlogDepartmentFilter")?.addEventListener("change", renderBacklog);
+    document.getElementById("closeBacklogModal")?.addEventListener("click", closeBacklogItemModal);
+    document.getElementById("cancelBacklogButton")?.addEventListener("click", closeBacklogItemModal);
+
     const modal = document.getElementById("backlogItemModal");
-    const closeButton = document.getElementById("closeBacklogModal");
-    const cancelButton = document.getElementById("cancelBacklogButton");
-    const form = document.getElementById("backlogItemForm");
+    modal?.addEventListener("click", function (event) { if (event.target === modal) closeBacklogItemModal(); });
 
-    if (addButton) {
-        addButton.addEventListener("click", function() { openBacklogItemModal(); });
-    }
-
-    const departmentFilter = document.getElementById("backlogDepartmentFilter");
-    if (departmentFilter) {
-        departmentFilter.addEventListener("change", renderBacklog);
-    }
-
-    if (closeButton) closeButton.addEventListener("click", closeBacklogItemModal);
-    if (cancelButton) cancelButton.addEventListener("click", closeBacklogItemModal);
-
-    if (modal) {
-        modal.addEventListener("click", function(event) {
-            if (event.target === modal) closeBacklogItemModal();
-        });
-    }
-
-       if (form) {
-        form.addEventListener("submit", async function(event) {
-
-            event.preventDefault();
-
-            if (isRequestActive("saveBacklog")) return;
-
-            const submitButton = document.getElementById("saveBacklogItemButton");
-            setButtonLoading(submitButton, true);
-
+    document.getElementById("backlogItemForm")?.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        if (isRequestActive("saveBacklog")) return;
+        const button = document.getElementById("saveBacklogItemButton");
+        setButtonLoading(button, true);
+        try {
             await guardAsync("saveBacklog", saveBacklogItemFromForm);
+        } finally {
+            setButtonLoading(button, false);
+        }
+    });
 
-            setButtonLoading(submitButton, false);
-
+    wireCommentForm("backlogDetailCommentForm", "backlogDetailCommentInput",
+        function () { return backlogDetailCurrentId; },
+        function () {
+            renderCommentsInto(backlogDetailCurrentId, document.getElementById("backlogDetailComments"));
+            if (currentPage === "backlog") renderBacklog();
         });
-    }
 
-    const commentForm = document.getElementById("backlogDetailCommentForm");
-    const commentInput = document.getElementById("backlogDetailCommentInput");
-
-       if (commentForm) {
-        commentForm.addEventListener("submit", async function(event) {
-
-            event.preventDefault();
-            if (!backlogDetailCurrentId) return;
-
-            const value = commentInput.value.trim();
-            if (!value) return;
-
-            const guardKey = "comment-backlog-" + backlogDetailCurrentId;
-            if (isRequestActive(guardKey)) return;
-
-            const submitButton = commentForm.querySelector("button[type='submit']");
-            setButtonLoading(submitButton, true);
-
-            await guardAsync(guardKey, async function() {
-                await addComment("backlog:" + backlogDetailCurrentId, value);
-            });
-
-            commentInput.value = "";
-            setButtonLoading(submitButton, false);
-
-            renderCommentsInto("backlog:" + backlogDetailCurrentId, document.getElementById("backlogDetailComments"));
-            renderBacklog();
-
-        });
-    }
+    const grid = document.getElementById("backlogGrid");
+    grid?.addEventListener("click", function (event) {
+        const edit = event.target.closest(".backlog-edit-button");
+        if (edit) {
+            event.stopPropagation();
+            const item = backlogTasks.find(function (i) { return i.backlogId === edit.dataset.id; });
+            if (item) openBacklogItemModal(item);
+            return;
+        }
+        const card = event.target.closest(".backlog-card");
+        if (card) openBacklogDetailDrawer(card.dataset.id);
+    });
 
 }
 
@@ -3636,29 +2922,13 @@ function openBacklogItemModal(item = null) {
     const modal = document.getElementById("backlogItemModal");
     if (!modal) return;
 
-    const title = document.getElementById("backlogModalTitle");
-
-    if (item) {
-
-        title.textContent = "Edit Backlog Item";
-        setInput("editBacklogId", item.backlogId);
-        setInput("backlogTitle", item.task);
-        setInput("backlogDepartment", item.department);
-        setInput("backlogStatus", item.status || "Future");
-        setInput("backlogDescription", item.description);
-        setInput("backlogExpectedDate", item.expectedDate || "");
-
-    } else {
-
-        title.textContent = "Add Backlog Item";
-        setInput("editBacklogId", "");
-        setInput("backlogTitle", "");
-        setInput("backlogDepartment", "");
-        setInput("backlogStatus", "Future");
-        setInput("backlogDescription", "");
-        setInput("backlogExpectedDate", "");
-
-    }
+    setText("backlogModalTitle", item ? "Edit Backlog Item" : "Add Backlog Item");
+    setInput("editBacklogId", item ? item.backlogId : "");
+    setInput("backlogTitle", item ? item.task : "");
+    setInput("backlogDepartment", item ? item.department : "");
+    setInput("backlogStatus", item ? (String(item.status).toLowerCase() === "paused" ? "Paused" : "Backlog") : "Backlog");
+    setInput("backlogDescription", item ? item.description : "");
+    setInput("backlogExpectedDate", item ? item.expectedDate : "");
 
     modal.style.display = "flex";
     document.body.classList.add("modal-open");
@@ -3666,12 +2936,11 @@ function openBacklogItemModal(item = null) {
 }
 
 function closeBacklogItemModal() {
-
     const modal = document.getElementById("backlogItemModal");
-    if (modal) modal.style.display = "none";
-
-    document.body.classList.remove("modal-open");
-
+    if (modal && modal.style.display !== "none") {
+        modal.style.display = "none";
+        document.body.classList.remove("modal-open");
+    }
 }
 
 async function saveBacklogItemFromForm() {
@@ -3679,18 +2948,14 @@ async function saveBacklogItemFromForm() {
     const editId = getInput("editBacklogId");
     const title = getInput("backlogTitle").trim();
 
-    if (!title) {
-        showNotification("Missing Information", "Please enter a title.");
-        return;
-    }
+    if (!title) return showNotification("Missing information", "Enter a title.");
 
     const payload = {
         task: title,
         department: getInput("backlogDepartment"),
-        status: getInput("backlogStatus") || "Future",
+        status: getInput("backlogStatus") || "Backlog",
         description: getInput("backlogDescription"),
-        expectedDate: getInput("backlogExpectedDate"),
-        updatedBy: currentUserLabel()
+        expectedDate: getInput("backlogExpectedDate")
     };
 
     const result = editId
@@ -3698,11 +2963,15 @@ async function saveBacklogItemFromForm() {
         : await apiRequest("createBacklogTask", payload);
 
     if (!result || !result.success) {
-        showNotification("Error", (result && result.message) || "Unable to save backlog item.");
-        return;
+        return showNotification("Not saved", result?.message || "Couldn't save the backlog item.");
     }
 
-    await loadBacklogTasks();
+    if (result.item) {
+        const index = backlogTasks.findIndex(function (b) { return b.backlogId === result.item.backlogId; });
+        if (index !== -1) backlogTasks[index] = result.item;
+        else backlogTasks.push(result.item);
+        persistLocalCacheSoon();
+    }
 
     closeBacklogItemModal();
     showNotification("Saved", "Backlog item saved.");
@@ -3715,54 +2984,41 @@ function renderBacklog() {
     const grid = document.getElementById("backlogGrid");
     if (!grid) return;
 
-    const departmentFilterValue = document.getElementById("backlogDepartmentFilter")?.value || "";
+    grid.classList.remove("skeleton-card-grid");
 
-    const scoped = departmentFilterValue
-        ? backlogTasks.filter(function(item) { return item.department === departmentFilterValue; })
-        : backlogTasks;
+    const filter = getInput("backlogDepartmentFilter");
+    const scoped = (filter ? backlogTasks.filter(function (i) { return i.department === filter; }) : backlogTasks)
+        .filter(function (i) { return String(i.status || "").toLowerCase() !== "moved to active"; });
 
-    /* Whichever backlog item has the nearest Expected Date / Period
-       surfaces first (Mine → Primary Department → Others, each sorted by
-       that date — same relevance ordering as All Tasks / Regular Tasks).
-       Items with no expected date, or a value that isn't a parseable
-       date (e.g. a loose period like "Q2 2026"), simply sort after ones
-       that do — see makeDateThenPriorityComparator. */
-    const ordered = orderByRelevance(scoped, { dateField: "expectedDate" });
+    const ordered = scoped.slice().sort(makeDateThenPriorityComparator("expectedDate"));
 
     if (!ordered.length) {
-        if (backlogLoadFailed) {
-            grid.innerHTML = `
-                <div class="load-error-state">
-                    <p>Unable to load the backlog.</p>
-                    <button type="button" class="load-error-retry-button" onclick="loadBacklogTasks().then(renderBacklog)">Retry</button>
-                </div>
-            `;
-            return;
-        }
-        grid.innerHTML = departmentFilterValue
-            ? `<div class="empty-state">No backlog items for ${escapeHtml(departmentFilterValue)} yet.</div>`
-            : `<div class="empty-state">No backlog items yet. Add future or paused work to keep track of it here.</div>`;
+        grid.innerHTML = !dataEverLoaded
+            ? skeletonCards(3)
+            : filter
+                ? `<div class="empty-state">No backlog items for ${escapeHtml(filter)} yet.</div>`
+                : `<div class="empty-state">No backlog items yet. Add future or paused work to keep track of it here.</div>`;
         return;
     }
 
-    grid.innerHTML = ordered.map(function(item) {
+    grid.innerHTML = ordered.map(function (item) {
 
-        const commentCount = getComments("backlog:" + item.backlogId).length;
-        const statusClass = String(item.status || "Future").toLowerCase() === "paused" ? "status-paused" : "status-backlog";
+        const commentCount = getComments(item.backlogId).length;
+        const statusClass = String(item.status || "").toLowerCase() === "paused" ? "status-paused" : "status-backlog";
         const dueSoon = isDueSoon(item, "expectedDate");
         const expectedDate = String(item.expectedDate || "").trim();
 
         return `
             <div class="backlog-card${dueSoon ? " card-due-soon" : ""}" data-id="${escapeHtml(item.backlogId)}">
                 <div class="backlog-card-top">
-                    <span class="backlog-status-chip ${statusClass}">${escapeHtml(item.status || "Future")}</span>
+                    <span class="backlog-status-chip ${statusClass}">${escapeHtml(item.status || "Backlog")}</span>
                     ${isPrivilegedUser() ? `<button type="button" class="table-action backlog-edit-button" data-id="${escapeHtml(item.backlogId)}">Edit</button>` : ""}
                 </div>
                 <h3>${escapeHtml(item.task)}</h3>
                 <p class="backlog-card-description">${escapeHtml(item.description || "No description yet.")}</p>
-                ${expectedDate ? `<div class="backlog-card-expected">Expected: ${escapeHtml(displayDate(expectedDate))}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</div>` : ""}
+                ${expectedDate ? `<div class="backlog-card-expected">Expected: ${displayDate(expectedDate)}${dueSoon ? ` <span class="due-soon-chip">Due Soon</span>` : ""}</div>` : ""}
                 <div class="backlog-card-footer">
-                    <span>${escapeHtml(item.department || "Unassigned")} · ${escapeHtml(displayDate(item.createdDate))}</span>
+                    <span>${escapeHtml(item.department || "Unassigned")} · ${displayDate(item.createdDate)}</span>
                     <span class="backlog-card-comment-count">💬 ${commentCount}</span>
                 </div>
             </div>
@@ -3770,160 +3026,150 @@ function renderBacklog() {
 
     }).join("");
 
-    grid.querySelectorAll(".backlog-card").forEach(function(card) {
-        card.addEventListener("click", function(event) {
-            if (event.target.closest(".backlog-edit-button")) return;
-            openBacklogDetailDrawer(card.dataset.id);
-        });
-    });
-
-    grid.querySelectorAll(".backlog-edit-button").forEach(function(button) {
-        button.addEventListener("click", function(event) {
-            event.stopPropagation();
-            const item = backlogTasks.find(function(i) { return i.backlogId === button.dataset.id; });
-            if (item) openBacklogItemModal(item);
-        });
-    });
-
 }
 
 function openBacklogDetailDrawer(id) {
 
-    const item = backlogTasks.find(function(i) { return i.backlogId === id; });
+    const item = backlogTasks.find(function (i) { return i.backlogId === id; });
     if (!item) return;
 
     backlogDetailCurrentId = id;
 
-    setText("backlogDetailStatusLabel", (item.status || "Future").toUpperCase());
+    setText("backlogDetailStatusLabel", String(item.status || "Backlog").toUpperCase());
     setText("backlogDetailTitle", item.task);
     setText("backlogDetailCreatedDate", displayDate(item.createdDate));
     setText("backlogDetailDepartment", item.department ? "· " + item.department : "");
     setText("backlogDetailDescription", item.description || "No description yet.");
+    setText("backlogDetailExpected", item.expectedDate ? "· Expected " + displayDate(item.expectedDate) : "");
 
-    const expectedElement = document.getElementById("backlogDetailExpected");
-    if (expectedElement) {
-        const expectedDate = String(item.expectedDate || "").trim();
-        expectedElement.textContent = expectedDate ? ("· Expected " + displayDate(expectedDate)) : "";
-    }
+    renderCommentsInto(id, document.getElementById("backlogDetailComments"));
 
-    renderCommentsInto("backlog:" + id, document.getElementById("backlogDetailComments"));
-
-    const drawer = document.getElementById("backlogDetailDrawer");
-    if (drawer) drawer.style.display = "block";
+    document.getElementById("backlogDetailDrawer").style.display = "block";
     document.body.classList.add("modal-open");
 
 }
 
 function closeBacklogDetailDrawer() {
-
     const drawer = document.getElementById("backlogDetailDrawer");
-    if (drawer) drawer.style.display = "none";
-
-    document.body.classList.remove("modal-open");
+    if (drawer && drawer.style.display !== "none") {
+        drawer.style.display = "none";
+        document.body.classList.remove("modal-open");
+    }
     backlogDetailCurrentId = "";
-
 }
 
-/* =========================================================================
+/* =========================================================
    BOOK FAIR
-========================================================================= */
+========================================================= */
 
 function initializeBookFair() {
 
-    const addButton = document.getElementById("bookFairAddButton");
+    document.getElementById("bookFairAddButton")?.addEventListener("click", function () {
+        openTaskModal();
+        setInput("taskDepartment", "Book Fair - Events");
+    });
 
-    if (addButton) {
-        addButton.addEventListener("click", function() {
-            currentDepartment = "Book Fair - Events";
-            openTaskModal();
-        });
-    }
+    const grid = document.getElementById("bookFairGrid");
+    grid?.addEventListener("click", function (event) {
+
+        const toggle = event.target.closest(".section-toggle");
+        if (toggle) {
+            toggleSection(toggle.dataset.pageKey, toggle.dataset.sectionKey);
+            return;
+        }
+
+        const clickable = event.target.closest(".bookfair-card-top, .bookfair-card-meta");
+        if (clickable) openTaskDetailDrawer(clickable.closest(".bookfair-card").dataset.id);
+
+    });
 
 }
-
-const PRIORITY_RANK = { High: 0, Medium: 1, Low: 2 };
 
 function renderBookFair() {
 
     const grid = document.getElementById("bookFairGrid");
     if (!grid) return;
 
-    const bookFairTasks = tasks.filter(function(task) { return task.department === "Book Fair - Events"; });
+    grid.classList.remove("skeleton-card-grid");
+
+    const bookFairTasks = tasks.filter(function (t) { return t.department === "Book Fair - Events"; });
 
     if (!bookFairTasks.length) {
-        grid.innerHTML = `<div class="empty-state">No Book Fair tasks yet. Add one to get started.</div>`;
+        grid.innerHTML = dataEverLoaded
+            ? `<div class="empty-state">No Book Fair tasks you can see yet.</div>`
+            : skeletonCards(2);
         return;
     }
 
-    // Same My Tasks → primary department → other departments grouping
-    // as the All Tasks page, each sorted by due date then priority.
-    const sections = buildRelevanceSections(bookFairTasks, { dateField: "dueDate" });
+    const sections = buildSections(bookFairTasks, { dateField: "dueDate", mineEmptyText: "No Book Fair tasks are assigned to you." });
 
-    const ordered = sections.reduce(function(all, section) { return all.concat(section.tasks); }, []);
+    grid.innerHTML = sections.map(function (section) {
 
-    function buildCardHtml(task) {
-
-        const priorityClass = "priority-border-" + String(task.priority || "").toLowerCase();
-        const dueSoon = isDueSoon(task);
-
-        return `
-            <div class="bookfair-card ${priorityClass}${dueSoon ? " card-due-soon" : ""}" data-id="${escapeHtml(task.taskId)}">
-                <div class="bookfair-card-top">
-                    <h3>${escapeHtml(task.task)}</h3>
-                    ${priorityBadge(task.priority)}
-                </div>
-                <div class="bookfair-card-meta">
-                    <span>${statusBadge(task.status, task)}</span>
-                    <span>${escapeHtml(task.assignedTo || "Unassigned")}</span>
-                    <span>Due ${dueDateWithChip(task)}</span>
-                </div>
-                <div class="bookfair-checklist-mini">
-                    <div class="detail-drawer-section-header">
-                        <h3>Checklist</h3>
-                        <span class="checklist-progress" id="bfProgress-${escapeHtml(task.taskId)}"></span>
-                    </div>
-                    <div class="checklist-list" id="bfChecklist-${escapeHtml(task.taskId)}"></div>
-                    <form class="checklist-add-form" id="bfChecklistForm-${escapeHtml(task.taskId)}">
-                        <input type="text" placeholder="Add checklist item..." id="bfChecklistInput-${escapeHtml(task.taskId)}">
-                        <button type="submit">+ Add</button>
-                    </form>
-                </div>
+        const expanded = isSectionExpanded("bookFair", section);
+        const header = `
+            <div class="grid-section-header${section.collapsible ? " grid-section-header-collapsible" : ""}">
+                <span>${escapeHtml(section.title)}</span>
+                <span class="table-section-count">${section.items.length}</span>
+                ${section.collapsible ? sectionToggleButton("bookFair", section, expanded) : ""}
             </div>
         `;
 
-    }
+        if (!expanded) return header;
+        if (!section.items.length) return header + `<div class="empty-state grid-span-all">${escapeHtml(section.emptyText)}</div>`;
 
-    grid.innerHTML = sections.map(function(section) {
-
-        const header = `<div class="grid-section-header">${escapeHtml(section.title)}<span class="table-section-count">${section.tasks.length}</span></div>`;
-        const cards = section.tasks.map(buildCardHtml).join("");
-
-        return header + cards;
+        return header + section.items.map(bookFairCardHtml).join("");
 
     }).join("");
 
-    ordered.forEach(function(task) {
+    refreshBookFairChecklists();
 
-        const entityKey = "task:" + task.taskId;
-        const listEl = document.getElementById("bfChecklist-" + task.taskId);
-        const formEl = document.getElementById("bfChecklistForm-" + task.taskId);
-        const inputEl = document.getElementById("bfChecklistInput-" + task.taskId);
-        const progressEl = document.getElementById("bfProgress-" + task.taskId);
+}
 
-        const refresh = function() {
-            renderChecklistInto(entityKey, listEl, formEl, inputEl, true, isPrivilegedUser(), refresh);
-            updateChecklistProgressLabel(entityKey, progressEl);
-        };
+function bookFairCardHtml(task) {
 
-        refresh();
+    const id = escapeHtml(task.taskId);
+    const priorityClass = "priority-border-" + String(task.priority || "").toLowerCase();
 
-    });
+    return `
+        <div class="bookfair-card ${priorityClass}${isDueSoon(task) ? " card-due-soon" : ""}" data-id="${id}">
+            <div class="bookfair-card-top">
+                <h3>${escapeHtml(task.task)}</h3>
+                ${priorityBadge(task.priority)}
+            </div>
+            <div class="bookfair-card-meta">
+                <span>${statusBadge(task.status, task)}</span>
+                <span class="owners-cell">${ownersDisplay(task.assignedTo)}</span>
+                <span>Due ${dueDateWithChip(task)}</span>
+            </div>
+            <div class="bookfair-checklist-mini">
+                <div class="detail-drawer-section-header">
+                    <h3>Checklist</h3>
+                    <span class="checklist-progress" data-bf-progress="${id}"></span>
+                </div>
+                <div class="checklist-list" data-bf-list="${id}"></div>
+                <form class="checklist-add-form" data-bf-form="${id}">
+                    <input type="text" placeholder="Add checklist item..." aria-label="New checklist item">
+                    <button type="submit">+ Add</button>
+                </form>
+            </div>
+        </div>
+    `;
 
-    grid.querySelectorAll(".bookfair-card-top, .bookfair-card-meta").forEach(function(clickable) {
-        clickable.addEventListener("click", function() {
-            const card = clickable.closest(".bookfair-card");
-            openTaskDetailDrawer(card.dataset.id);
-        });
+}
+
+function refreshBookFairChecklists() {
+
+    const grid = document.getElementById("bookFairGrid");
+    if (!grid) return;
+
+    grid.querySelectorAll(".bookfair-card").forEach(function (card) {
+        const id = card.dataset.id;
+        const form = card.querySelector("[data-bf-form]");
+        renderChecklistInto(id,
+            card.querySelector("[data-bf-list]"),
+            form,
+            form ? form.querySelector("input") : null,
+            { canAdd: true, canDelete: isPrivilegedUser(), progressElement: card.querySelector("[data-bf-progress]") });
     });
 
 }
