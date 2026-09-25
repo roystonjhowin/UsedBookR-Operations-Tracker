@@ -2512,3 +2512,202 @@ tr.row-others.row-due-soon td { background: #fdf1ef; }
     .ai-messages { padding: 14px; }
     .ai-bubble { max-width: 94%; }
 }
+/* =========================================================
+   EXCELSO v7 — POLISH & SPEED LAYER
+   Load AFTER style.css and enhancements.css.
+   1. Removes never-ending decorative animations (they keep phones'
+      CPUs busy and drain battery).
+   2. Styles the new v7 pieces: sync button, greeting, clickable KPI
+      cards, last-update line on regular tasks, mobile tab bar,
+      phone-friendly "card" tables.
+========================================================= */
+
+/* ---------- 1. SPEED: stop decorative loops ---------- */
+.topbar::after,
+.sidebar-header::after,
+.login-aurora,
+.login-card::before,
+.login-card::after { animation: none !important; }
+
+.checklist-dot-red { animation: none !important; }
+tbody tr { animation: none !important; }
+.priority-badge, .status-badge { animation: none !important; }
+.kpi-card, .regular-task-group, .backlog-card, .bookfair-card { animation-duration: 0.25s; }
+.page.active-page { animation-duration: 0.2s; }
+
+.department-card, .regular-task-card, .backlog-card, .bookfair-card { will-change: auto; }
+
+/* Content that is off-screen isn't painted until scrolled to */
+.regular-task-group, .backlog-card, .bookfair-card, .ecosystem-panel {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 260px;
+}
+
+@media (max-width: 900px) {
+    .topbar { backdrop-filter: none; background: rgba(255,255,255,0.97); }
+    .modal-overlay, .detail-drawer-overlay, .regular-task-update-modal-overlay, .sidebar-backdrop { backdrop-filter: none; }
+    .kpi-card:hover, .backlog-card:hover, .bookfair-card:hover, .regular-task-card:hover, .department-card:hover { transform: none; }
+}
+
+/* ---------- 2. SYNC BUTTON (top bar) ---------- */
+.sync-button {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1.5px solid var(--border); background: var(--surface); color: var(--muted);
+    font-size: 11.5px; font-weight: 600; padding: 7px 12px; border-radius: 999px; cursor: pointer;
+    transition: border-color .15s, color .15s, background-color .15s;
+    white-space: nowrap;
+}
+.sync-button:hover { border-color: var(--forest-mid); color: var(--forest); }
+.sync-icon { display: inline-block; font-size: 14px; line-height: 1; color: var(--forest-mid); }
+.sync-button.is-syncing .sync-icon { animation: spin 0.9s linear infinite; }
+.sync-button.is-error { border-color: #f3caca; background: #fdf1f1; color: var(--danger); }
+.sync-button.is-error .sync-icon { color: var(--danger); }
+
+/* ---------- 3. DASHBOARD GREETING ---------- */
+.dashboard-hero {
+    padding: 22px 24px; border-radius: var(--radius-lg);
+    background: linear-gradient(120deg, var(--forest-deep) 0%, var(--forest-dark) 55%, #1c5a3a 100%);
+    color: #f4f1e6; box-shadow: var(--shadow-md); align-items: center;
+}
+.dashboard-hero h2 { color: #fff; }
+.dashboard-hero h2::after { background: linear-gradient(90deg, var(--gold-soft), transparent); }
+.dashboard-hero p { color: #bfd0c4; }
+.hero-date {
+    display: block; margin-bottom: 6px; font-family: var(--font-mono);
+    font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--gold-soft);
+}
+.dashboard-hero .primary-button { background: var(--gold-soft); color: var(--forest-deep); box-shadow: none; }
+.dashboard-hero .primary-button:hover { filter: brightness(1.05); }
+
+/* ---------- 4. CLICKABLE KPI CARDS ---------- */
+.kpi-grid:not(.kpi-grid-static) .kpi-card { cursor: pointer; }
+.kpi-grid:not(.kpi-grid-static) .kpi-card:focus-visible { outline: 2px solid var(--forest-mid); outline-offset: 2px; }
+.kpi-grid:not(.kpi-grid-static) .kpi-card small::after { content: " →"; opacity: 0; transition: opacity .15s; }
+.kpi-grid:not(.kpi-grid-static) .kpi-card:hover small::after { opacity: 1; }
+.kpi-grid-static .kpi-card { cursor: default; }
+.kpi-overdue.has-value { background: #fdf3ef; border-color: #f0cfc3; }
+.kpi-overdue.has-value strong { color: var(--danger); }
+
+/* ---------- 5. TABLES ---------- */
+.table-container { max-height: none; }
+thead th { position: sticky; top: 0; z-index: 1; }
+.cell-id { font-family: var(--font-mono); font-size: 11px; color: var(--forest-mid); font-weight: 600; white-space: nowrap; }
+tr.row-overdue td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
+
+.status-badge { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.status-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .7; }
+
+/* checklist indicators */
+.checklist-dot-empty { background: transparent; border: 2px solid #cfcabb; box-shadow: none; }
+.checklist-count { margin-left: 6px; font-size: 10.5px; font-weight: 700; color: var(--muted); font-family: var(--font-mono); vertical-align: middle; }
+
+/* ---------- 6. REGULAR TASKS: last update line ---------- */
+.regular-task-last {
+    display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted);
+    padding: 6px 9px; border-radius: 7px; background: var(--surface); border: 1px dashed var(--border);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.regular-task-last-dot { width: 7px; height: 7px; border-radius: 50%; background: #cfcabb; flex-shrink: 0; }
+.regular-task-last.is-done { color: var(--forest-dark); border-style: solid; border-color: #b8dcc3; background: #f0f8f2; }
+.regular-task-last.is-done .regular-task-last-dot { background: var(--forest-mid); }
+.regular-task-last.is-pending { color: #8a6a1e; border-style: solid; border-color: #efdcae; background: #fbf6e8; }
+.regular-task-last.is-pending .regular-task-last-dot { background: var(--warning); }
+.regular-task-last-none { font-style: italic; }
+
+/* ---------- 7. NOTIFICATIONS, COMMENTS, ACTIVITY, FOLLOW-UPS ---------- */
+.notification.is-problem .notification-icon { background: var(--danger); }
+.notification.is-problem { border-left: 4px solid var(--danger); }
+
+.comment-bubble.is-mine { background: #eef6f0; border-color: #cfe5d6; margin-left: 24px; }
+
+.activity-item.row-clickable { cursor: pointer; border-radius: 8px; }
+.activity-item.row-clickable:hover { background: var(--surface-alt); }
+
+.followup-card-overdue strong { color: var(--danger); }
+.followup-card-overdue { border-top: 3px solid var(--danger); }
+
+/* ---------- 8. MOBILE TAB BAR ---------- */
+.mobile-tabbar { display: none; }
+
+@media (max-width: 900px) {
+    .mobile-tabbar {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+        display: grid; grid-template-columns: repeat(5, 1fr);
+        background: var(--surface); border-top: 1px solid var(--border);
+        box-shadow: 0 -6px 20px rgba(22, 32, 28, 0.08);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    .tab-item {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        border: none; background: transparent; color: var(--muted);
+        font-size: 10.5px; font-weight: 600; padding: 8px 2px 7px; min-height: 56px; cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .tab-icon { font-size: 17px; line-height: 1; }
+    .tab-item.active { color: var(--forest); }
+    .tab-item.active .tab-icon { transform: translateY(-1px); }
+
+    .app { padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
+    .notification { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+    .action-loader { bottom: calc(74px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ---------- 9. SMALL SCREENS ---------- */
+@media (max-width: 650px) {
+    .top-add-label, .sync-status, .scope-toggle-label { display: none; }
+    .scope-toggle { padding: 6px; }
+    .sync-button { padding: 7px 9px; }
+    .topbar-left h1 { font-size: 17px; }
+    .topbar-left p { display: none; }
+    .dashboard-hero { padding: 18px; }
+    .dashboard-hero .primary-button { width: 100%; }
+    .kpi-card { padding: 14px; }
+    .kpi-card strong { font-size: 24px; }
+}
+
+/* Tables become stacked cards on phones (no sideways scrolling) */
+@media (max-width: 700px) {
+    .table-container table { min-width: 0; }
+    .table-container thead { display: none; }
+    .table-container table, .table-container tbody { display: block; width: 100%; }
+
+    .table-container tbody tr:not(.table-section-row):not(.skeleton-row) {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
+        margin: 10px 12px; padding: 12px 14px;
+        border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface);
+    }
+    .table-container tbody tr.row-overdue { border-left: 4px solid var(--warning); }
+    .table-container tbody tr.row-due-soon { border-left: 4px solid var(--danger); }
+    .table-container tbody tr td { display: block; padding: 0; border: none; background: transparent !important; box-shadow: none !important; font-size: 12.5px; min-width: 0; }
+
+    .table-container td[data-label]::before {
+        content: attr(data-label); display: block; margin-bottom: 2px;
+        font-size: 9.5px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--muted);
+    }
+    .table-container td[data-label=""]::before { display: none; }
+
+    /* Task name spans full width and reads like a card title */
+    .table-container td.cell-title, .table-container td[data-label="Task"] { grid-column: 1 / -1; font-size: 14px; font-weight: 700; order: -1; }
+    .table-container td.cell-title::before, .table-container td[data-label="Task"]::before { display: none; }
+    .table-container td.cell-id, .table-container td[data-label="ID"], .table-container td[data-label="Task ID"] { order: -2; }
+    .table-container td.cell-action, .table-container td[data-label="Actions"], .table-container td[data-label="Action"] { grid-column: 1 / -1; }
+    .table-container td.cell-action .table-action { width: 100%; padding: 9px; }
+
+    /* section headers and empty rows */
+    .table-container tr.table-section-row, .table-container tr.skeleton-row { display: block; }
+    .table-container tr.table-section-row td, .table-container tr.skeleton-row td { display: block; }
+    .table-container td[colspan] { display: block; text-align: center; }
+    .table-container td[colspan]::before { display: none; }
+    .checklist-cell { text-align: left; }
+}
+
+/* ---------- 10. AI CHAT HEIGHT on phones (address bar safe) ---------- */
+.ai-chat { height: calc(100dvh - 250px); }
+@media (max-width: 900px) {
+    .ai-chat { height: calc(100dvh - 260px); min-height: 380px; }
+}
+
+/* ---------- Respect "reduce motion" everywhere ---------- */
+@media (prefers-reduced-motion: reduce) {
+    .sync-button.is-syncing .sync-icon { animation: none; }
+}
