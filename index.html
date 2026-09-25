@@ -13,8 +13,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="enhancements.css">
+    <link rel="stylesheet" href="style.css?v=6.3">
+    <link rel="stylesheet" href="enhancements.css?v=6.3">
     <link rel="preload" as="image" href="assets/logo-usedbookr.png">
 </head>
 <body>
@@ -80,7 +80,7 @@
                 </button>
             </form>
 
-            <div class="login-footer">Authorized Operations Access</div>
+            <div class="login-footer">Authorized Operations Access · v6.1</div>
         </div>
     </div>
 </div>
@@ -116,6 +116,10 @@
             <button class="nav-item" data-page="backlog"><span class="nav-icon">▤</span><span>Backlog</span></button>
             <button class="nav-item" data-page="bookFair"><span class="nav-icon">◆</span><span>Book Fair</span></button>
 
+            <!-- Shown only to users with AI access (Founder, Operations Head, Teja) -->
+            <div class="navigation-title nav-ai-only" style="display:none;">AI</div>
+            <button class="nav-item nav-ai-only" data-page="ai" style="display:none;"><span class="nav-icon">✦</span><span>AI Assistant</span></button>
+
             <div class="navigation-title">DEPARTMENTS</div>
 
             <button class="nav-item department-item" data-department="B2B - Sales"><span class="department-code">B2B</span><span>B2B / Sales</span></button>
@@ -145,6 +149,7 @@
                 </div>
             </div>
             <button id="logoutButton" class="logout-button"><span aria-hidden="true">&#10148;</span> Logout</button>
+            <div class="app-version">Version 6.1</div>
         </div>
     </aside>
 
@@ -160,6 +165,10 @@
             </div>
             <div class="topbar-right">
                 <span id="currentDate">--</span>
+                <button id="scopeToggle" class="scope-toggle" type="button" aria-pressed="false" title="Switch between only your tasks and everyone's tasks">
+                    <span class="scope-toggle-track" aria-hidden="true"><span class="scope-toggle-thumb"></span></span>
+                    <span class="scope-toggle-label">Show others' tasks</span>
+                </button>
                 <button id="topAddTask" class="top-add-button" type="button"><span aria-hidden="true">+</span> Add Task</button>
             </div>
         </header>
@@ -176,6 +185,9 @@
                     </div>
                     <button id="dashboardAddTask" class="primary-button" type="button">+ Add New Task</button>
                 </div>
+
+                <!-- Personal check-in about the logged-in user's own tasks (everyone sees their own) -->
+                <div id="myInsightCard" class="insight-card" style="display:none;" aria-live="polite"></div>
 
                 <div class="kpi-grid">
                     <div class="kpi-card kpi-total"><span>Total Tasks</span><strong id="totalTasks">0</strong><small id="totalTasksScope">All departments</small></div>
@@ -358,6 +370,27 @@
                 </div>
                 <div id="bookFairGrid" class="bookfair-grid skeleton-card-grid">
                     <div class="skeleton-card"><div class="skeleton-bar skeleton-bar-title"></div><div class="skeleton-bar" style="width:78%;"></div></div>
+                </div>
+            </section>
+
+            <!-- AI ASSISTANT -->
+            <section id="aiPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">ASK ABOUT YOUR OPERATIONS</span>
+                        <h2>AI Assistant</h2>
+                        <p>Ask about tasks, updates, deadlines, changes or team performance. Answers come from the live data in Excelso.</p>
+                    </div>
+                    <button id="aiNewChatButton" class="secondary-button" type="button">New chat</button>
+                </div>
+
+                <div class="panel ai-chat">
+                    <div id="aiMessages" class="ai-messages" aria-live="polite"></div>
+                    <form id="aiForm" class="ai-composer">
+                        <textarea id="aiInput" rows="2" placeholder="e.g. What is overdue in Warehouse and who owns it?" aria-label="Your question"></textarea>
+                        <button type="submit" class="primary-button" id="aiSendButton">Ask</button>
+                    </form>
+                    <p class="ai-composer-hint">Enter to send · Shift+Enter for a new line · Click a task ID in an answer to open it</p>
                 </div>
             </section>
 
@@ -743,6 +776,7 @@
     <span id="actionLoaderText">Saving…</span>
 </div>
 
-<script src="script.js" defer></script>
+<script src="script.js?v=6.3" defer></script>
+<script src="ai.js?v=6.3" defer></script>
 </body>
 </html>
