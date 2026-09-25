@@ -58,8 +58,14 @@ let taskDetailCurrentId = "";
 let backlogDetailCurrentId = "";
 let regularTaskChecklistCurrentId = "";
 
-// Which "Others in my department" sections are expanded, per page.
+// Which "others" sections the person has opened/closed by hand, per page.
 const expandedSections = {};
+
+// Global switch in the top bar. Off (default) = only tasks you own,
+// everywhere. On = also other people's tasks you have access to.
+let showEveryone = false;
+
+const APP_VERSION = "6.3";
 
 let taskOwnerPicker = null;
 let taskDetailOwnerPicker = null;
@@ -205,6 +211,9 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeRegularTasksPage();
     initializeKeyboardShortcuts();
     initializeBackgroundRefresh();
+    initializeScopeToggle();
+
+    console.info("Excelso frontend version " + APP_VERSION);
 
     checkLogin();
     initializePageLoader();
@@ -325,6 +334,9 @@ function checkLogin() {
 
 function enterApp() {
 
+    try { showEveryone = sessionStorage.getItem("usedbookrShowEveryone") === "1"; } catch (e) { showEveryone = false; }
+    updateScopeToggle();
+
     hideLogin();
     updateLoggedInUserProfile();
     applyUserAccess();
@@ -354,10 +366,14 @@ function logoutUser(options = {}) {
     allComments = {};
     users = [];
     dataEverLoaded = false;
+    if (typeof resetAiState === "function") resetAiState();
 
     sessionStorage.removeItem("usedbookrCurrentUser");
     sessionStorage.removeItem("usedbookrSessionToken");
     sessionStorage.removeItem("usedbookrOperationsLogin");
+    sessionStorage.removeItem("usedbookrShowEveryone");
+    showEveryone = false;
+    Object.keys(expandedSections).forEach(function (k) { delete expandedSections[k]; });
     clearLocalCaches();
 
     closeAllOverlays();
@@ -460,15 +476,16 @@ function applyUserAccess() {
     const filterPanel = document.getElementById("regularTasksFilterPanel");
     if (filterPanel) filterPanel.style.display = privileged ? "" : "none";
 
-    if (privileged) {
-        setText("tasksScopeText", "Manage tasks across all departments.");
-        setText("dashboardScopeText", "Monitor tasks, priorities and follow-ups across all 14 departments.");
-        setText("totalTasksScope", "All departments");
+    const othersText = privileged ? "everyone's tasks" : (primary ? `the rest of ${primary}` : "other people's tasks");
+
+    if (!showEveryone) {
+        setText("tasksScopeText", `Tasks you own, across every department. Use "Show others' tasks" to see ${othersText}.`);
+        setText("dashboardScopeText", "Numbers for tasks you own.");
+        setText("totalTasksScope", "Owned by you");
     } else {
-        const deptText = primary ? ` and the rest of ${primary}` : "";
-        setText("tasksScopeText", `Your tasks across every department${deptText}.`);
-        setText("dashboardScopeText", `Your tasks${deptText}.`);
-        setText("totalTasksScope", primary ? `Yours + ${primary}` : "Assigned to you");
+        setText("tasksScopeText", `Your tasks first, then ${othersText}.`);
+        setText("dashboardScopeText", `Numbers for your tasks and ${othersText}.`);
+        setText("totalTasksScope", privileged ? "All departments" : (primary ? `Yours + ${primary}` : "Yours + others"));
     }
 
 }
@@ -654,7 +671,8 @@ function updatePageHeader(page) {
         followups: ["Follow-ups", "Monitor commitments and pending actions"],
         activity: ["Activity Log", "Track operational changes"],
         backlog: ["Backlog", "Future and paused tasks parked for later"],
-        bookFair: ["Book Fair", "Tasks and checklists for Book Fair / Events"]
+        bookFair: ["Book Fair", "Tasks and checklists for Book Fair / Events"],
+        ai: ["AI Assistant", "Ask questions about all tasks and updates"]
     };
 
     if (names[page]) {
@@ -677,6 +695,7 @@ function renderCurrentPage() {
         case "bookFair": renderBookFair(); break;
         case "department": if (currentDepartment) showDepartmentPage(currentDepartment); break;
         case "departments": renderDepartmentCards(); break;
+        case "ai": if (typeof renderAiPage === "function") renderAiPage(); break;
     }
 
 }
@@ -746,7 +765,8 @@ function slowRequestEnded() {
 const NON_IDEMPOTENT_ACTIONS = new Set([
     "login", "createTask", "addTask", "createBacklogTask", "addChecklistItem",
     "addTaskComment", "addBookFairChecklistItem", "moveBacklogToTask",
-    "saveRegularTaskUpdate", "deleteChecklistItem", "deleteTask"
+    "saveRegularTaskUpdate", "deleteChecklistItem", "deleteTask",
+    "aiAsk"
 ]);
 
 const REQUEST_TIMEOUT_MS = 30000;
@@ -760,7 +780,7 @@ async function apiRequest(action, data = {}, options = {}) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
+        const timeoutId = setTimeout(function () { controller.abort(); }, options.timeoutMs || REQUEST_TIMEOUT_MS);
         let slowShown = false;
         const slowTimer = options.silent ? null : setTimeout(function () {
             slowShown = true;
@@ -919,6 +939,12 @@ function applyDataSnapshot(snapshot) {
 
     populateRegularTasksDepartmentFilter();
 
+    if (typeof snapshot.aiAccess === "boolean" && currentUser) {
+        currentUser.aiAccess = snapshot.aiAccess;
+        sessionStorage.setItem("usedbookrCurrentUser", JSON.stringify(currentUser));
+    }
+    if (typeof applyAiAccess === "function") applyAiAccess();
+
 }
 
 async function loadCoreData() {
@@ -940,6 +966,7 @@ async function loadCoreData() {
             dataLoadFailed = false;
             lastLoadedAt = Date.now();
             persistLocalCache();
+            if (typeof loadMyInsight === "function") loadMyInsight();
 
             const sectionErrors = Object.keys(result.errors || {});
             if (sectionErrors.length) {
@@ -954,9 +981,9 @@ async function loadCoreData() {
 
             dataLoadFailed = true;
             showGlobalStatusBanner(
-                dataEverLoaded || tasks.length
-                    ? "Couldn't refresh just now — you're seeing the last saved data."
-                    : "Couldn't load your data. " + (result?.message || ""),
+                (dataEverLoaded || tasks.length
+                    ? "Couldn't refresh — showing the last saved data. "
+                    : "Couldn't load your data. ") + (result?.message || ""),
                 { isError: true, onRetry: loadCoreData }
             );
 
@@ -1254,8 +1281,9 @@ function makeSectionComparator(dateField) {
 }
 
 /* Returns [{ key, title, items, collapsible, emptyText }].
-   Admins: "My Tasks" + "All Other Tasks" (both open).
-   Everyone else: "My Tasks" + "Others in <primary dept>" (collapsed). */
+   Everyone: "My Tasks" (always open) + other people's tasks, hidden
+   until the section button or the top-bar switch is clicked.
+   Admins' "others" = everyone else; others' = rest of their department. */
 function buildSections(items, options = {}) {
 
     const comparator = makeSectionComparator(options.dateField || "dueDate");
@@ -1281,15 +1309,11 @@ function buildSections(items, options = {}) {
         emptyText: options.mineEmptyText || "Nothing is assigned to you here."
     });
 
-    if (privileged) {
-        if (others.length) {
-            sections.push({ key: "others", title: "All Other Tasks", items: others, collapsible: false });
-        }
-    } else if (others.length) {
+    if (others.length) {
         const primary = primaryDepartment();
         sections.push({
             key: "others",
-            title: primary ? `Others in ${primary}` : "Other tasks",
+            title: privileged ? "Everyone else's tasks" : (primary ? `Others in ${primary}` : "Other tasks"),
             items: others,
             collapsible: true
         });
@@ -1301,13 +1325,42 @@ function buildSections(items, options = {}) {
 
 function isSectionExpanded(pageKey, section) {
     if (!section.collapsible) return true;
-    return !!expandedSections[pageKey + ":" + section.key];
+    const key = pageKey + ":" + section.key;
+    return key in expandedSections ? expandedSections[key] : showEveryone;
 }
 
 function toggleSection(pageKey, sectionKey) {
     const key = pageKey + ":" + sectionKey;
-    expandedSections[key] = !expandedSections[key];
+    const current = key in expandedSections ? expandedSections[key] : showEveryone;
+    expandedSections[key] = !current;
     renderCurrentPage();
+}
+
+/* Tasks used for dashboard numbers, follow-ups, activity etc. */
+function scopedTasks() {
+    return showEveryone ? tasks : tasks.filter(function (t) { return currentUserMatches(t.assignedTo); });
+}
+
+function setShowEveryone(value) {
+    showEveryone = !!value;
+    Object.keys(expandedSections).forEach(function (k) { delete expandedSections[k]; });
+    try { sessionStorage.setItem("usedbookrShowEveryone", showEveryone ? "1" : "0"); } catch (e) { /* ignore */ }
+    updateScopeToggle();
+    applyUserAccess();
+    renderCurrentPage();
+}
+
+function updateScopeToggle() {
+    const button = document.getElementById("scopeToggle");
+    if (!button) return;
+    button.setAttribute("aria-pressed", String(showEveryone));
+    button.classList.toggle("is-on", showEveryone);
+    const label = button.querySelector(".scope-toggle-label");
+    if (label) label.textContent = showEveryone ? "Hide others' tasks" : "Show others' tasks";
+}
+
+function initializeScopeToggle() {
+    document.getElementById("scopeToggle")?.addEventListener("click", function () { setShowEveryone(!showEveryone); });
 }
 
 function sectionToggleButton(pageKey, section, expanded) {
@@ -1329,16 +1382,18 @@ function countStatus(list, status) {
 
 function updateDashboard() {
 
-    animateNumber("totalTasks", tasks.length);
-    animateNumber("openTasks", countStatus(tasks, "Open"));
-    animateNumber("progressTasks", countStatus(tasks, "In Progress"));
-    animateNumber("onHoldTasks", countStatus(tasks, STATUS_ON_HOLD));
-    animateNumber("completedTasks", countStatus(tasks, "Completed"));
-    animateNumber("overdueTasks", tasks.filter(isOverdue).length);
+    const list = scopedTasks();
 
-    animateNumber("highPriorityCount", tasks.filter(function (t) { return t.priority === "High"; }).length);
-    animateNumber("mediumPriorityCount", tasks.filter(function (t) { return t.priority === "Medium"; }).length);
-    animateNumber("lowPriorityCount", tasks.filter(function (t) { return t.priority === "Low"; }).length);
+    animateNumber("totalTasks", list.length);
+    animateNumber("openTasks", countStatus(list, "Open"));
+    animateNumber("progressTasks", countStatus(list, "In Progress"));
+    animateNumber("onHoldTasks", countStatus(list, STATUS_ON_HOLD));
+    animateNumber("completedTasks", countStatus(list, "Completed"));
+    animateNumber("overdueTasks", list.filter(isOverdue).length);
+
+    animateNumber("highPriorityCount", list.filter(function (t) { return t.priority === "High"; }).length);
+    animateNumber("mediumPriorityCount", list.filter(function (t) { return t.priority === "Medium"; }).length);
+    animateNumber("lowPriorityCount", list.filter(function (t) { return t.priority === "Low"; }).length);
 
     updateFollowupSummary();
     renderRecentTasks();
@@ -1378,14 +1433,14 @@ function renderRecentTasks() {
     const tbody = document.getElementById("recentTasksTable");
     if (!tbody) return;
 
-    const recent = tasks.slice()
+    const recent = scopedTasks().slice()
         .sort(function (a, b) { return String(b.updatedDate).localeCompare(String(a.updatedDate)); })
         .slice(0, 10);
 
     tbody.innerHTML = "";
 
     if (!recent.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-table">${dataEverLoaded ? "No tasks yet." : "Loading tasks…"}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-table">${dataEverLoaded ? (showEveryone ? "No tasks yet." : "No tasks assigned to you yet.") : "Loading tasks…"}</td></tr>`;
         return;
     }
 
@@ -1528,14 +1583,8 @@ function renderTasksTable() {
         return;
     }
 
-    // Admins who search/filter get one flat list. Everyone else always sees
-    // My Tasks + Others; a text search opens the Others section automatically
-    // so matches there aren't hidden.
-    if (isPrivilegedUser() && !noActiveFilters) {
-        batchRows(tbody, filtered.slice().sort(makeSectionComparator("dueDate")), function (task) { return buildTaskRow(task); });
-        return;
-    }
-
+    // Always My Tasks first, others hidden until asked for. A text search
+    // opens the others section automatically so matches aren't hidden.
     renderSectionedTable(tbody, filtered, "tasks", 9, {}, !!search);
 
 }
@@ -1584,10 +1633,11 @@ function initializeTableDelegation() {
 function updateFollowupSummary() {
 
     const today = startOfToday();
+    const list = scopedTasks();
 
-    const todayCount = tasks.filter(function (t) { return t.followupDate && sameDate(t.followupDate, today); }).length;
-    const overdue = tasks.filter(function (t) { return t.followupDate && dateBeforeToday(t.followupDate); }).length;
-    const upcoming = tasks.filter(function (t) {
+    const todayCount = list.filter(function (t) { return t.followupDate && sameDate(t.followupDate, today); }).length;
+    const overdue = list.filter(function (t) { return t.followupDate && dateBeforeToday(t.followupDate); }).length;
+    const upcoming = list.filter(function (t) {
         const date = parseDate(t.followupDate);
         return date && date > today;
     }).length;
@@ -1606,7 +1656,7 @@ function renderFollowups() {
     const tbody = document.getElementById("followupsTable");
     if (!tbody) return;
 
-    const followups = tasks
+    const followups = scopedTasks()
         .filter(function (t) { return t.followupDate; })
         .sort(function (a, b) { return String(a.followupDate).localeCompare(String(b.followupDate)); });
 
@@ -1663,13 +1713,14 @@ function showDepartmentPage(department) {
         : "Tasks in this department that you can see.");
 
     const list = tasks.filter(function (t) { return t.department === department; });
+    const kpiList = scopedTasks().filter(function (t) { return t.department === department; });
 
-    setText("departmentTotal", list.length);
-    setText("departmentOpen", countStatus(list, "Open"));
-    setText("departmentProgress", countStatus(list, "In Progress"));
-    setText("departmentOnHold", countStatus(list, STATUS_ON_HOLD));
-    setText("departmentCompleted", countStatus(list, "Completed"));
-    setText("departmentOverdue", list.filter(isOverdue).length);
+    setText("departmentTotal", kpiList.length);
+    setText("departmentOpen", countStatus(kpiList, "Open"));
+    setText("departmentProgress", countStatus(kpiList, "In Progress"));
+    setText("departmentOnHold", countStatus(kpiList, STATUS_ON_HOLD));
+    setText("departmentCompleted", countStatus(kpiList, "Completed"));
+    setText("departmentOverdue", kpiList.filter(isOverdue).length);
 
     const tbody = document.getElementById("departmentTasksTable");
     if (!tbody) return;
@@ -1691,7 +1742,7 @@ function renderDepartmentCards() {
     if (!container) return;
 
     container.innerHTML = DEPARTMENTS.map(function (department) {
-        const list = tasks.filter(function (t) { return t.department === department; });
+        const list = scopedTasks().filter(function (t) { return t.department === department; });
         return `
             <div class="department-card">
                 <div class="department-card-code">${getDepartmentCode(department)}</div>
@@ -1722,12 +1773,14 @@ function renderActivity() {
     const container = document.getElementById("activityTimeline");
     if (!container) return;
 
-    if (!tasks.length) {
-        container.innerHTML = `<div class="empty-state">No activity recorded yet.</div>`;
+    const list = scopedTasks();
+
+    if (!list.length) {
+        container.innerHTML = `<div class="empty-state">No activity on your tasks yet.</div>`;
         return;
     }
 
-    const activities = tasks.slice()
+    const activities = list.slice()
         .sort(function (a, b) { return String(b.updatedDate).localeCompare(String(a.updatedDate)); })
         .slice(0, 20);
 
@@ -2198,27 +2251,15 @@ function renderRegularTasks() {
         return;
     }
 
-    if (isPrivilegedUser()) {
+    const filter = isPrivilegedUser() ? getInput("regularTasksDepartmentFilter") : "";
+    const scoped = filter ? regularTasks.filter(function (t) { return String(t.department || "").trim() === filter; }) : regularTasks;
 
-        const filter = getInput("regularTasksDepartmentFilter");
-        const scoped = filter ? regularTasks.filter(function (t) { return String(t.department || "").trim() === filter; }) : regularTasks;
-
-        if (!scoped.length) {
-            container.innerHTML = `<div class="regular-tasks-empty">No regular tasks in ${escapeHtml(filter)} yet.</div>`;
-            return;
-        }
-
-        const mine = scoped.filter(function (t) { return currentUserMatches(t.assignedTo); });
-        const rest = scoped.filter(function (t) { return !currentUserMatches(t.assignedTo); });
-
-        container.innerHTML =
-            (mine.length ? `<div class="section-block"><div class="grid-section-header"><span>My Regular Tasks</span><span class="table-section-count">${mine.length}</span></div>${regularGroupsHtml(mine)}</div>` : "") +
-            (rest.length ? `<div class="section-block"><div class="grid-section-header"><span>${mine.length ? "Everyone Else" : "All Regular Tasks"}</span><span class="table-section-count">${rest.length}</span></div>${regularGroupsHtml(rest)}</div>` : "");
+    if (!scoped.length) {
+        container.innerHTML = `<div class="regular-tasks-empty">No regular tasks in ${escapeHtml(filter)} yet.</div>`;
         return;
-
     }
 
-    const sections = buildSections(regularTasks, {
+    const sections = buildSections(scoped, {
         dateField: "expectedDate",
         mineEmptyText: "No regular tasks are assigned to you."
     });
