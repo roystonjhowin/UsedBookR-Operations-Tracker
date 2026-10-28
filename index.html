@@ -17,9 +17,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=Inter:wght@400..800&family=IBM+Plex+Mono:wght@600&display=swap" rel="stylesheet">
 
     <!-- When you change a CSS/JS file, raise the ?v= number so every browser loads the new copy -->
-    <link rel="stylesheet" href="style.css?v=7.0">
-    <link rel="stylesheet" href="enhancements.css?v=7.0">
-    <link rel="stylesheet" href="polish.css?v=7.0">
+    <link rel="stylesheet" href="style.css?v=8.0">
+    <link rel="stylesheet" href="enhancements.css?v=8.0">
+    <link rel="stylesheet" href="polish.css?v=8.0">
+    <link rel="stylesheet" href="features.css?v=8.0">
     <link rel="preload" as="image" href="assets/logo-usedbookr.png">
 </head>
 <body>
@@ -81,7 +82,7 @@
                 </button>
             </form>
 
-            <div class="login-footer">Authorized operations access, v7.0</div>
+            <div class="login-footer">Authorized operations access, v8.0</div>
         </div>
     </div>
 </div>
@@ -122,23 +123,13 @@
 
             <div class="navigation-title">Departments</div>
 
-            <button class="nav-item department-item" data-department="B2B - Sales"><span class="department-code">B2B</span><span>B2B / Sales</span></button>
-            <button class="nav-item department-item" data-department="Customer Support"><span class="department-code">CS</span><span>Customer Support</span></button>
-            <button class="nav-item department-item" data-department="Warehouse"><span class="department-code">WH</span><span>Warehouse</span></button>
-            <button class="nav-item department-item" data-department="Scanning - Catalog"><span class="department-code">SC</span><span>Scanning / Catalog</span></button>
-            <button class="nav-item department-item" data-department="Listing - Inventory"><span class="department-code">LI</span><span>Listing / Inventory</span></button>
-            <button class="nav-item department-item" data-department="Digital Marketing"><span class="department-code">DM</span><span>Digital Marketing</span></button>
-            <button class="nav-item department-item" data-department="IT - Software Development"><span class="department-code">IT</span><span>IT / Software Development</span></button>
-            <button class="nav-item department-item" data-department="Finance"><span class="department-code">FN</span><span>Finance</span></button>
-            <button class="nav-item department-item" data-department="Book Fair - Events"><span class="department-code">BF</span><span>Book Fair / Events</span></button>
-            <button class="nav-item department-item" data-department="Books and Supply Procurement"><span class="department-code">BP</span><span>Books & Supply Procurement</span></button>
-            <button class="nav-item department-item" data-department="HR"><span class="department-code">HR</span><span>HR</span></button>
-            <button class="nav-item department-item" data-department="Data Analysis"><span class="department-code">DA</span><span>Data Analysis</span></button>
-            <button class="nav-item department-item" data-department="Software Testing"><span class="department-code">ST</span><span>Software Testing</span></button>
-            <button class="nav-item department-item" data-department="Product Development"><span class="department-code">PD</span><span>Product Development</span></button>
-            <button class="nav-item department-item" data-department="General Admin"><span class="department-code">GA</span><span>General Admin</span></button>
-          
+            <div id="departmentNav" class="department-nav"></div>
+
+            <div class="navigation-title">Records</div>
             <button class="nav-item" data-page="activity"><span class="nav-icon">◷</span><span>Activity Log</span></button>
+
+            <div class="navigation-title admin-only" style="display:none;">Admin</div>
+            <button class="nav-item admin-only" data-page="admin" style="display:none;"><span class="nav-icon">⚙</span><span>Team &amp; Departments</span></button>
         </nav>
 
         <div class="sidebar-footer">
@@ -150,7 +141,7 @@
                 </div>
             </div>
             <button id="logoutButton" class="logout-button"><span aria-hidden="true">&#10148;</span> Logout</button>
-            <div class="app-version">Version 7.0</div>
+            <div class="app-version">Version 8.0</div>
         </div>
     </aside>
 
@@ -186,7 +177,7 @@
                     <div>
                         <span id="dashboardDateLine" class="hero-date"></span>
                         <h2 id="dashboardGreeting">Operations Dashboard</h2>
-                        <p id="dashboardScopeText">Monitor tasks, priorities and follow-ups across all 14 departments.</p>
+                        <p id="dashboardScopeText">Monitor tasks, priorities and follow-ups across every department.</p>
                     </div>
                     <button id="dashboardAddTask" class="primary-button" type="button">+ Add New Task</button>
                 </div>
@@ -253,6 +244,7 @@
                         <h2>Regular Tasks</h2>
                         <p>Log each recurring job when it's done. The card shows the latest update.</p>
                     </div>
+                    <button id="regularTaskAddButton" class="primary-button admin-only" type="button" style="display:none;">+ Add Regular Task</button>
                 </div>
 
                 <div id="regularTasksFilterPanel" class="filter-panel regular-tasks-filter-panel" style="display:none;">
@@ -383,18 +375,81 @@
                     <div>
                         <span class="page-label">Ask about your operations</span>
                         <h2>AI Assistant</h2>
-                        <p>Ask about tasks, updates, deadlines, changes or team performance. Answers come from the live data in Excelso.</p>
+                        <p id="aiPageIntro">Ask about tasks, updates, deadlines, changes or team performance. Answers come from the live data in Excelso.</p>
                     </div>
                     <button id="aiNewChatButton" class="secondary-button" type="button">New chat</button>
                 </div>
 
-                <div class="panel ai-chat">
-                    <div id="aiMessages" class="ai-messages" aria-live="polite"></div>
-                    <form id="aiForm" class="ai-composer">
-                        <textarea id="aiInput" rows="2" placeholder="e.g. What is overdue in Warehouse and who owns it?" aria-label="Your question"></textarea>
-                        <button type="submit" class="primary-button" id="aiSendButton">Ask</button>
-                    </form>
-                    <p class="ai-composer-hint">Enter to send, Shift+Enter for a new line. Click a task ID in an answer to open it.</p>
+                <div id="aiTabs" class="ai-tabs admin-only" role="tablist" style="display:none;">
+                    <button type="button" class="ai-tab is-active" data-ai-tab="chat" role="tab" aria-selected="true">Ask</button>
+                    <button type="button" class="ai-tab" data-ai-tab="extract" role="tab" aria-selected="false">Find tasks in notes</button>
+                    <button type="button" class="ai-tab" data-ai-tab="kb" role="tab" aria-selected="false">Knowledge base <span id="kbCountBadge" class="ai-tab-count"></span></button>
+                </div>
+
+                <!-- Ask -->
+                <div id="aiPanelChat" class="ai-panel">
+                    <div class="panel ai-chat">
+                        <div id="aiMessages" class="ai-messages" aria-live="polite"></div>
+                        <form id="aiForm" class="ai-composer">
+                            <textarea id="aiInput" rows="2" placeholder="e.g. What is overdue in Warehouse and who owns it?" aria-label="Your question"></textarea>
+                            <button type="submit" class="primary-button" id="aiSendButton">Ask</button>
+                        </form>
+                        <p class="ai-composer-hint">Enter to send, Shift+Enter for a new line. Click a task or note ID in an answer to open it.</p>
+                    </div>
+                </div>
+
+                <!-- Find tasks in a meeting transcript / WhatsApp chat -->
+                <div id="aiPanelExtract" class="ai-panel" hidden>
+                    <div class="panel extract-input-panel">
+                        <div class="extract-source-switch" role="radiogroup" aria-label="What are you adding?">
+                            <label class="extract-source"><input type="radio" name="extractSource" value="meeting" checked><span>Meeting transcript or notes</span></label>
+                            <label class="extract-source"><input type="radio" name="extractSource" value="whatsapp"><span>WhatsApp chat</span></label>
+                        </div>
+
+                        <label id="extractDropzone" class="extract-dropzone" for="extractFile">
+                            <input type="file" id="extractFile" accept=".txt,.md,.vtt,.srt,.csv,.docx,.pdf,.zip,text/plain">
+                            <strong id="extractDropTitle">Drop a file here or choose one</strong>
+                            <span id="extractDropHint">.txt, .docx, .pdf, .vtt / .srt transcripts. WhatsApp: Export chat → Without media (.txt or .zip).</span>
+                        </label>
+
+                        <div class="form-group">
+                            <label for="extractText">Or paste the text</label>
+                            <textarea id="extractText" rows="8" placeholder="Paste the meeting transcript, your meeting notes, or the WhatsApp messages…"></textarea>
+                            <small id="extractCharCount" class="extract-char-count"></small>
+                        </div>
+
+                        <div class="extract-options">
+                            <div class="form-group">
+                                <label for="extractLabel">Name this source <span class="field-optional">(optional)</span></label>
+                                <input type="text" id="extractLabel" placeholder="e.g. Weekly ops meeting 28 Oct">
+                            </div>
+                            <div class="form-group" id="extractSinceGroup" hidden>
+                                <label for="extractSince">Only messages since <span class="field-optional">(optional)</span></label>
+                                <input type="date" id="extractSince">
+                            </div>
+                            <label class="extract-check"><input type="checkbox" id="extractSaveKb" checked> Also save it to the knowledge base</label>
+                        </div>
+
+                        <div id="extractError" class="form-inline-error" role="alert"></div>
+
+                        <div class="extract-actions">
+                            <button type="button" id="extractClearButton" class="secondary-button">Clear</button>
+                            <button type="button" id="extractRunButton" class="primary-button">Find tasks</button>
+                        </div>
+                    </div>
+
+                    <div id="extractResults" class="extract-results" aria-live="polite"></div>
+                </div>
+
+                <!-- Knowledge base -->
+                <div id="aiPanelKb" class="ai-panel" hidden>
+                    <div class="kb-toolbar">
+                        <input type="search" id="kbSearch" placeholder="Search notes…" aria-label="Search notes">
+                        <select id="kbCategoryFilter" aria-label="Category"><option value="">All categories</option></select>
+                        <button type="button" id="kbAddButton" class="primary-button">+ New note</button>
+                    </div>
+                    <p class="kb-hint">Everything here is private to the Founder and Operations Head, and the AI Assistant reads it when you ask questions.</p>
+                    <div id="kbList" class="kb-list"></div>
                 </div>
             </section>
 
@@ -404,7 +459,7 @@
                     <div>
                         <span class="page-label">Organization</span>
                         <h2>Departments</h2>
-                        <p>All 14 departments and their operational workload.</p>
+                        <p>Every department and its operational workload.</p>
                     </div>
                 </div>
                 <div id="departmentsGrid" class="departments-grid"></div>
@@ -447,11 +502,54 @@
                     <div>
                         <span class="page-label">Audit trail</span>
                         <h2>Activity Log</h2>
-                        <p>The most recently changed tasks. Tap one to open it.</p>
+                        <p id="activityIntro">The most recently changed tasks. Tap one to open it.</p>
                     </div>
+                    <div class="page-header-actions admin-only" style="display:none;">
+                        <select id="activityClearRange" aria-label="What to clear">
+                            <option value="90">Older than 90 days</option>
+                            <option value="30">Older than 30 days</option>
+                            <option value="0">Everything</option>
+                        </select>
+                        <button id="activityClearButton" class="danger-button" type="button">Clear log</button>
+                    </div>
+                </div>
+                <div class="filter-panel activity-filter admin-only" style="display:none;">
+                    <div class="filter-field"><label for="activitySearch">Search</label><input type="search" id="activitySearch" placeholder="Task ID, person, action…"></div>
                 </div>
                 <div class="panel">
                     <div id="activityTimeline" class="activity-timeline"></div>
+                </div>
+            </section>
+
+            <!-- TEAM & DEPARTMENTS (Founder / Operations Head) -->
+            <section id="adminPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">Admin</span>
+                        <h2>Team &amp; Departments</h2>
+                        <p>Changes are written to every sheet: renaming a person or department updates it on all tasks, logs and lists.</p>
+                    </div>
+                </div>
+
+                <div class="admin-columns">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div><h3>Team members</h3><p>Task owners and sign-in accounts (Users sheet)</p></div>
+                            <button id="teamAddButton" class="primary-button" type="button">+ Add person</button>
+                        </div>
+                        <div id="teamList" class="team-list"><div class="empty-state">Loading…</div></div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div><h3>Departments</h3><p>Used in every department dropdown (lists sheet)</p></div>
+                        </div>
+                        <form id="departmentAddForm" class="department-add-form">
+                            <input type="text" id="departmentAddInput" placeholder="New department name" aria-label="New department name" maxlength="60">
+                            <button type="submit" class="primary-button">Add</button>
+                        </form>
+                        <div id="departmentAdminList" class="department-admin-list"></div>
+                    </div>
                 </div>
             </section>
         </div>
@@ -535,6 +633,7 @@
             <div id="taskFormError" class="form-inline-error" role="alert"></div>
 
             <div class="modal-footer">
+                <button type="button" id="deleteTaskModalButton" class="danger-button modal-footer-left" style="display:none;">Delete task</button>
                 <button type="button" id="cancelTaskButton" class="secondary-button">Cancel</button>
                 <button type="submit" class="primary-button">Save Task</button>
             </div>
@@ -655,6 +754,7 @@
 
                 <button type="button" id="taskDetailSaveMetaButton" class="primary-button" style="display:none;">Save Changes</button>
                 <p id="taskDetailLockedNote" class="meta-locked-note">Only the Operations Head / Founder can edit owners, priority and dates.</p>
+                <button type="button" id="taskDetailDeleteButton" class="danger-button danger-button-block admin-only" style="display:none;">Delete task</button>
             </aside>
 
         </div>
@@ -690,6 +790,15 @@
                     </select>
                 </div>
 
+                <div class="form-group">
+                    <label for="backlogPriority">Priority</label>
+                    <select id="backlogPriority">
+                        <option value="High">High</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                </div>
+
                 <div class="form-group full-width">
                     <label for="backlogExpectedDate">Expected Date / Period <span class="field-optional">(optional)</span></label>
                     <input type="text" id="backlogExpectedDate" placeholder="e.g. 15 Jan 2027, or Q2 2026">
@@ -702,6 +811,7 @@
             </div>
 
             <div class="modal-footer">
+                <button type="button" id="deleteBacklogButton" class="danger-button modal-footer-left" style="display:none;">Delete item</button>
                 <button type="button" id="cancelBacklogButton" class="secondary-button">Cancel</button>
                 <button type="submit" class="primary-button" id="saveBacklogItemButton">Save Item</button>
             </div>
@@ -723,6 +833,11 @@
                     Created <strong id="backlogDetailCreatedDate">-</strong><span id="backlogDetailDepartment"></span><span id="backlogDetailExpected"></span>
                 </p>
                 <p id="backlogDetailDescription" class="detail-drawer-static-description">-</p>
+
+                <div class="drawer-admin-actions admin-only" style="display:none;">
+                    <button type="button" id="backlogDetailEditButton" class="secondary-button">Edit</button>
+                    <button type="button" id="backlogDetailDeleteButton" class="danger-button">Delete</button>
+                </div>
 
                 <div class="detail-drawer-comments">
                     <h3>Comments</h3>
@@ -767,6 +882,189 @@
     </div>
 </div>
 
+<!-- REGULAR TASK MODAL (add / edit) -->
+<div id="regularTaskModal" class="modal-overlay" style="display:none;">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="regularTaskModalTitle">
+        <div class="modal-header">
+            <div><span class="modal-label">Regular task</span><h2 id="regularTaskModalTitle">Add Regular Task</h2></div>
+            <button type="button" class="modal-close" data-close-modal="regularTaskModal" aria-label="Close">×</button>
+        </div>
+        <form id="regularTaskForm" class="modal-form" novalidate>
+            <input type="hidden" id="regularTaskEditId">
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="regularTaskName">Task *</label>
+                    <input type="text" id="regularTaskName" placeholder="e.g. Computer restart (Tuesday)" required>
+                </div>
+                <div class="form-group">
+                    <label for="regularTaskDepartment">Department *</label>
+                    <select id="regularTaskDepartment"><option value="">Select Department</option></select>
+                </div>
+                <div class="form-group">
+                    <label id="regularTaskOwnersLabel">Owners</label>
+                    <div id="regularTaskOwnerPicker" class="owner-picker" aria-labelledby="regularTaskOwnersLabel"></div>
+                </div>
+                <div class="form-group">
+                    <label for="regularTaskFrequency">How often *</label>
+                    <input type="text" id="regularTaskFrequency" list="regularTaskFrequencyOptions" placeholder="daily, weekly, twice weekly, monthly…">
+                    <datalist id="regularTaskFrequencyOptions">
+                        <option value="daily"></option><option value="twice weekly"></option><option value="weekly"></option><option value="monthly"></option>
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label for="regularTaskPriority">Priority</label>
+                    <select id="regularTaskPriority"><option value="High">High</option><option value="Medium" selected>Medium</option><option value="Low">Low</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="regularTaskExpectedDate">Next expected date <span class="field-optional">(optional)</span></label>
+                    <input type="date" id="regularTaskExpectedDate">
+                </div>
+            </div>
+            <div id="regularTaskFormError" class="form-inline-error" role="alert"></div>
+            <div class="modal-footer">
+                <button type="button" id="regularTaskDeleteButton" class="danger-button modal-footer-left" style="display:none;">Delete</button>
+                <button type="button" class="secondary-button" data-close-modal="regularTaskModal">Cancel</button>
+                <button type="submit" class="primary-button" id="regularTaskSaveButton">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- TEAM MEMBER MODAL -->
+<div id="teamMemberModal" class="modal-overlay" style="display:none;">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="teamMemberModalTitle">
+        <div class="modal-header">
+            <div><span class="modal-label">Team</span><h2 id="teamMemberModalTitle">Add person</h2></div>
+            <button type="button" class="modal-close" data-close-modal="teamMemberModal" aria-label="Close">×</button>
+        </div>
+        <form id="teamMemberForm" class="modal-form" novalidate autocomplete="off">
+            <input type="hidden" id="teamMemberOriginalUsername">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="teamMemberName">Name (as shown on tasks) *</label>
+                    <input type="text" id="teamMemberName" placeholder="e.g. Priya" required>
+                </div>
+                <div class="form-group">
+                    <label for="teamMemberUsername">Username for sign-in *</label>
+                    <input type="text" id="teamMemberUsername" placeholder="e.g. priya" autocapitalize="off" spellcheck="false" required>
+                </div>
+                <div class="form-group">
+                    <label for="teamMemberRole">Role *</label>
+                    <input type="text" id="teamMemberRole" list="teamRoleOptions" placeholder="e.g. Warehouse Lead">
+                    <datalist id="teamRoleOptions">
+                        <option value="Founder"></option><option value="Operations Head"></option><option value="Team Member"></option>
+                    </datalist>
+                    <small class="meta-field-hint">"Founder" or "Operations Head" gives full admin access.</small>
+                </div>
+                <div class="form-group">
+                    <label for="teamMemberDepartment">Primary department</label>
+                    <select id="teamMemberDepartment"></select>
+                </div>
+                <div class="form-group full-width">
+                    <label>Also coordinates <span class="field-optional">(optional)</span></label>
+                    <div id="teamMemberCoordination" class="chip-checklist"></div>
+                </div>
+                <div class="form-group">
+                    <label for="teamMemberPassword" id="teamMemberPasswordLabel">Password *</label>
+                    <input type="text" id="teamMemberPassword" placeholder="At least 6 characters" autocomplete="new-password">
+                    <small id="teamMemberPasswordHint" class="meta-field-hint">Share it with them privately. It's stored encrypted.</small>
+                </div>
+                <div class="form-group">
+                    <label for="teamMemberStatus">Status</label>
+                    <select id="teamMemberStatus"><option value="Active">Active — can sign in</option><option value="Inactive">Inactive — can't sign in</option></select>
+                </div>
+                <label class="extract-check full-width"><input type="checkbox" id="teamMemberAi"> Can use the AI Assistant (chat only)</label>
+            </div>
+            <div id="teamMemberRemoveGroup" class="remove-panel" hidden>
+                <p id="teamMemberRemoveText" class="modal-text"></p>
+                <div class="form-group">
+                    <label for="teamMemberReassign">Give their tasks to</label>
+                    <select id="teamMemberReassign"></select>
+                </div>
+                <div class="remove-panel-actions">
+                    <button type="button" class="secondary-button" id="teamMemberRemoveCancel">Keep them</button>
+                    <button type="button" class="danger-button" id="teamMemberRemoveConfirm">Remove permanently</button>
+                </div>
+            </div>
+            <div id="teamMemberFormError" class="form-inline-error" role="alert"></div>
+            <div class="modal-footer">
+                <button type="button" id="teamMemberDeleteButton" class="danger-button modal-footer-left" style="display:none;">Remove person</button>
+                <button type="button" class="secondary-button" data-close-modal="teamMemberModal">Cancel</button>
+                <button type="submit" class="primary-button" id="teamMemberSaveButton">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- DEPARTMENT MODAL (rename / remove) -->
+<div id="departmentModal" class="modal-overlay" style="display:none;">
+    <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="departmentModalTitle">
+        <div class="modal-header">
+            <div><span class="modal-label">Department</span><h2 id="departmentModalTitle">Rename department</h2></div>
+            <button type="button" class="modal-close" data-close-modal="departmentModal" aria-label="Close">×</button>
+        </div>
+        <form id="departmentForm" class="modal-form" novalidate>
+            <input type="hidden" id="departmentModalMode">
+            <input type="hidden" id="departmentModalOriginal">
+            <p id="departmentModalText" class="modal-text"></p>
+            <div class="form-group" id="departmentRenameGroup">
+                <label for="departmentNewName">New name</label>
+                <input type="text" id="departmentNewName" maxlength="60">
+            </div>
+            <div class="form-group" id="departmentMoveGroup">
+                <label for="departmentMoveTo">Move its work to</label>
+                <select id="departmentMoveTo"></select>
+            </div>
+            <div id="departmentFormError" class="form-inline-error" role="alert"></div>
+            <div class="modal-footer">
+                <button type="button" class="secondary-button" data-close-modal="departmentModal">Cancel</button>
+                <button type="submit" class="primary-button" id="departmentSaveButton">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- KNOWLEDGE NOTE MODAL -->
+<div id="kbNoteModal" class="modal-overlay" style="display:none;">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="kbNoteModalTitle">
+        <div class="modal-header">
+            <div><span class="modal-label" id="kbNoteModalLabel">Knowledge base</span><h2 id="kbNoteModalTitle">New note</h2></div>
+            <button type="button" class="modal-close" data-close-modal="kbNoteModal" aria-label="Close">×</button>
+        </div>
+        <form id="kbNoteForm" class="modal-form" novalidate>
+            <input type="hidden" id="kbNoteId">
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="kbNoteTitle">Title *</label>
+                    <input type="text" id="kbNoteTitle" placeholder="e.g. Packing guidelines for Amazon orders" maxlength="150">
+                </div>
+                <div class="form-group">
+                    <label for="kbNoteCategory">Category</label>
+                    <select id="kbNoteCategory"></select>
+                </div>
+                <div class="form-group">
+                    <label for="kbNoteTags">Tags <span class="field-optional">(optional)</span></label>
+                    <input type="text" id="kbNoteTags" placeholder="e.g. amazon, packing">
+                </div>
+                <div class="form-group full-width">
+                    <div class="kb-content-label">
+                        <label for="kbNoteContent">Content *</label>
+                        <label class="kb-file-button">Fill from file<input type="file" id="kbNoteFile" accept=".txt,.md,.docx,.csv,.vtt,.srt"></label>
+                    </div>
+                    <textarea id="kbNoteContent" rows="14" placeholder="Write or paste the note…"></textarea>
+                    <small id="kbNoteMeta" class="meta-field-hint"></small>
+                </div>
+            </div>
+            <div id="kbNoteFormError" class="form-inline-error" role="alert"></div>
+            <div class="modal-footer">
+                <button type="button" id="kbNoteDeleteButton" class="danger-button modal-footer-left" style="display:none;">Delete note</button>
+                <button type="button" class="secondary-button" data-close-modal="kbNoteModal">Cancel</button>
+                <button type="submit" class="primary-button" id="kbNoteSaveButton">Save note</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- NOTIFICATION -->
 <div id="notification" class="notification" role="status" aria-live="polite">
     <div class="notification-icon" aria-hidden="true">✓</div>
@@ -786,7 +1084,8 @@
     <span id="actionLoaderText">Saving…</span>
 </div>
 
-<script src="script.js?v=7.0" defer></script>
-<script src="ai.js?v=7.0" defer></script>
+<script src="script.js?v=8.0" defer></script>
+<script src="ai.js?v=8.0" defer></script>
+<script src="admin.js?v=8.0" defer></script>
 </body>
 </html>
