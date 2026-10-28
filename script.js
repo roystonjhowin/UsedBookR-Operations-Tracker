@@ -1,5 +1,12 @@
 /* =========================================================
-   EXCELSO OPERATIONS MANAGEMENT SYSTEM — FRONTEND  (v7)
+   EXCELSO OPERATIONS MANAGEMENT SYSTEM — FRONTEND  (v8)
+
+   v8: departments come from the "lists" sheet (no more hardcoded
+   list), Founder / Operations Head get delete buttons on tasks,
+   comments, checklists and backlog items, plus admin.js (regular
+   task editor, activity log tools, Team & Departments page).
+   Everything below from v7 is kept.
+
 
    Pairs with Code.gs v7. What's new:
    - Stays signed in across tabs and after closing the browser
@@ -15,7 +22,8 @@
 const API_URL =
     "https://script.google.com/macros/s/AKfycbyrOAQZ--7aDiAHv0ey60C8-xXuTKDAhOVDQjUOc-uiGdgNnpuJ97nL4m-ABkw0Znf3ig/exec";
 
-const DEPARTMENTS = [
+/* [v8] Fallback only — the real list arrives from the "lists" sheet. */
+let DEPARTMENTS = [
     "B2B - Sales",
     "Customer Support",
     "Warehouse",
@@ -29,12 +37,14 @@ const DEPARTMENTS = [
     "HR",
     "Data Analysis",
     "Software Testing",
-    "Product Development"
+    "Product Development",
+    "Business Development",
+    "General Admin"
 ];
 
 const STATUS_ON_HOLD = "On Hold";
 
-const APP_VERSION = "7.0";
+const APP_VERSION = "8.0";
 
 const POLL_INTERVAL_MS = 60 * 1000;        // look for other people's changes every minute
 const REFOCUS_REFRESH_MS = 30 * 1000;      // refresh when you come back after 30 s+
@@ -70,6 +80,7 @@ let showEveryone = false;
 
 let taskOwnerPicker = null;
 let taskDetailOwnerPicker = null;
+const extraOwnerPickers = [];   // [v8] pickers created by admin.js / ai.js
 
 /* =========================================================
    STORAGE — localStorage so you stay signed in across tabs,
@@ -171,7 +182,7 @@ function labelCells(tbody) {
    LOCAL CACHE — instant paint on open, per user
 ========================================================= */
 
-const CACHE_PREFIX = "usedbookrCache7:";
+const CACHE_PREFIX = "usedbookrCache8:";
 
 function cacheKeyForUser() {
     return CACHE_PREFIX + String(currentUser?.username || "").toLowerCase();
@@ -187,7 +198,8 @@ function persistLocalCache() {
         users: users,
         checklists: allChecklists,
         comments: allComments,
-        regularLatest: regularLatest
+        regularLatest: regularLatest,
+        departments: DEPARTMENTS
     }));
 }
 
@@ -415,6 +427,7 @@ function logoutUser(options = {}) {
     dataEverLoaded = false;
     lastSignature = "";
     if (typeof resetAiState === "function") resetAiState();
+    if (typeof resetAdminState === "function") resetAdminState();
 
     store.remove("usedbookrCurrentUser");
     store.remove("usedbookrSessionToken");
@@ -530,6 +543,12 @@ function applyUserAccess() {
     const filterPanel = document.getElementById("regularTasksFilterPanel");
     if (filterPanel) filterPanel.style.display = privileged ? "" : "none";
 
+    // [v8] Founder / Operations Head only controls
+    document.querySelectorAll(".admin-only").forEach(function (el) {
+        el.style.display = privileged ? "" : "none";
+    });
+    if (!privileged && currentPage === "admin") showPage("dashboard");
+
     const othersText = privileged ? "everyone's tasks" : (primary ? `the rest of ${primary}` : "other people's tasks");
 
     if (!showEveryone) {
@@ -639,8 +658,13 @@ function normalizeStatus(status) {
 function fillDepartmentSelect(id, firstLabel) {
     const select = document.getElementById(id);
     if (!select) return;
-    select.innerHTML = `<option value="">${escapeHtml(firstLabel)}</option>` +
-        DEPARTMENTS.map(function (d) { return `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`; }).join("");
+    const previous = select.value;
+    const list = DEPARTMENTS.slice();
+    // Keep a value that is no longer listed (e.g. an old task) selectable.
+    if (previous && list.indexOf(previous) === -1) list.push(previous);
+    select.innerHTML = (firstLabel !== null ? `<option value="">${escapeHtml(firstLabel)}</option>` : "") +
+        list.map(function (d) { return `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`; }).join("");
+    if (previous) select.value = previous;
 }
 
 function initializeDepartments() {
@@ -648,6 +672,32 @@ function initializeDepartments() {
     fillDepartmentSelect("departmentFilter", "All Departments");
     fillDepartmentSelect("backlogDepartment", "Unassigned");
     fillDepartmentSelect("backlogDepartmentFilter", "All Departments");
+    fillDepartmentSelect("regularTaskDepartment", "Select Department");
+    renderDepartmentNav();
+}
+
+/* [v8] Called whenever the department list changes. */
+function setDepartments(list) {
+    if (!Array.isArray(list) || !list.length) return;
+    const cleaned = [];
+    list.forEach(function (d) {
+        const name = String(d || "").trim();
+        if (name && cleaned.indexOf(name) === -1) cleaned.push(name);
+    });
+    if (JSON.stringify(cleaned) === JSON.stringify(DEPARTMENTS)) return;
+    DEPARTMENTS = cleaned;
+    initializeDepartments();
+    if (typeof onDepartmentsChanged === "function") onDepartmentsChanged();
+}
+
+function renderDepartmentNav() {
+    const nav = document.getElementById("departmentNav");
+    if (!nav) return;
+    nav.innerHTML = DEPARTMENTS.map(function (d) {
+        const active = currentPage === "department" && currentDepartment === d;
+        return `<button class="nav-item department-item${active ? " active" : ""}" data-department="${escapeHtml(d)}">` +
+            `<span class="department-code">${escapeHtml(getDepartmentCode(d))}</span><span>${escapeHtml(d)}</span></button>`;
+    }).join("");
 }
 
 function initializeDate() {
@@ -666,6 +716,13 @@ function initializeNavigation() {
             else if (item.dataset.page) showPage(item.dataset.page);
             closeSidebarOnMobile();
         });
+    });
+
+    document.getElementById("departmentNav")?.addEventListener("click", function (event) {
+        const item = event.target.closest(".department-item");
+        if (!item) return;
+        openDepartment(item.dataset.department);
+        closeSidebarOnMobile();
     });
 
     const menu = document.getElementById("menuToggle");
@@ -733,7 +790,8 @@ function updatePageHeader(page) {
         activity: ["Activity Log", "Track operational changes"],
         backlog: ["Backlog", "Future and paused tasks parked for later"],
         bookFair: ["Book Fair", "Tasks and checklists for Book Fair / Events"],
-        ai: ["AI Assistant", "Ask questions about all tasks and updates"]
+        ai: ["AI Assistant", "Ask questions about all tasks and updates"],
+        admin: ["Team & Departments", "Add people, departments and keep every sheet in step"]
     };
 
     if (names[page]) {
@@ -750,12 +808,16 @@ function renderCurrentPage() {
         case "tasks": renderTasksTable(); break;
         case "regularTasks": renderRegularTasks(); break;
         case "followups": updateFollowupSummary(); renderFollowups(); break;
-        case "activity": renderActivity(); break;
+        case "activity":
+            if (isPrivilegedUser() && typeof renderAdminActivity === "function") renderAdminActivity();
+            else renderActivity();
+            break;
         case "backlog": renderBacklog(); break;
         case "bookFair": renderBookFair(); break;
         case "department": if (currentDepartment) showDepartmentPage(currentDepartment); break;
         case "departments": renderDepartmentCards(); break;
         case "ai": if (typeof renderAiPage === "function") renderAiPage(); break;
+        case "admin": if (typeof renderAdminPage === "function") renderAdminPage(); break;
     }
 
 }
@@ -869,7 +931,10 @@ const NON_IDEMPOTENT_ACTIONS = new Set([
     "login", "createTask", "addTask", "createBacklogTask", "addChecklistItem",
     "addTaskComment", "addBookFairChecklistItem", "moveBacklogToTask",
     "saveRegularTaskUpdate", "deleteChecklistItem", "deleteTask",
-    "aiAsk"
+    "aiAsk", "aiExtractTasks", "createTasksBulk", "createRegularTask",
+    "addTeamMember", "addDepartment", "saveKnowledgeNote", "clearActivityLog",
+    "deleteComment", "deleteBacklogTask", "deleteRegularTask", "deleteTeamMember",
+    "deleteKnowledgeNote", "removeDepartment", "renameDepartment", "updateTeamMember"
 ]);
 
 const REQUEST_TIMEOUT_MS = 30000;
@@ -1037,6 +1102,7 @@ function applyDataSnapshot(snapshot) {
     if (Array.isArray(snapshot.regularTasks)) regularTasks = snapshot.regularTasks.filter(canSeeItem);
     if (Array.isArray(snapshot.backlog)) backlogTasks = snapshot.backlog;
     if (Array.isArray(snapshot.users)) setUsers(snapshot.users);
+    if (Array.isArray(snapshot.departments)) setDepartments(snapshot.departments);
     if (snapshot.regularLatest && typeof snapshot.regularLatest === "object") regularLatest = snapshot.regularLatest;
 
     if (Array.isArray(snapshot.checklists)) allChecklists = groupByTaskId(snapshot.checklists);
@@ -1058,7 +1124,7 @@ function applyDataSnapshot(snapshot) {
 function snapshotSignature(result) {
     try {
         return JSON.stringify([result.tasks, result.regularTasks, result.backlog, result.checklists,
-            result.comments, result.regularLatest, result.users, result.aiAccess]);
+            result.comments, result.regularLatest, result.users, result.aiAccess, result.departments]);
     } catch (e) {
         return String(Date.now());
     }
@@ -1223,6 +1289,7 @@ function setUsers(list) {
 
     if (taskOwnerPicker) taskOwnerPicker.refresh();
     if (taskDetailOwnerPicker) taskDetailOwnerPicker.refresh();
+    extraOwnerPickers.forEach(function (p) { if (p && document.body.contains(p.root)) p.refresh(); });
 
 }
 
@@ -1387,7 +1454,8 @@ function createOwnerPicker(root) {
         refresh: function () {
             api.setValue(api.getValue());
         },
-        close: close
+        close: close,
+        root: root
     };
 
     root._picker = api;
@@ -2014,6 +2082,7 @@ function closeAllOverlays() {
     closeBacklogDetailDrawer();
     closeRegularTaskChecklistDrawer();
     if (taskDetailCurrentId) closeTaskDetailDrawer();
+    if (typeof closeAdminModals === "function") closeAdminModals();
 }
 
 function initializeTaskForm() {
@@ -2036,6 +2105,9 @@ function openTaskModal(task = null) {
     if (!modal) return;
 
     showTaskFormError("");
+
+    const deleteButton = document.getElementById("deleteTaskModalButton");
+    if (deleteButton) deleteButton.style.display = task && isPrivilegedUser() ? "" : "none";
 
     if (task) {
         editingTaskId = task.taskId;
@@ -2310,9 +2382,16 @@ function getDepartmentCode(department) {
         "B2B - Sales": "B2B", "Customer Support": "CS", "Warehouse": "WH", "Scanning - Catalog": "SC",
         "Listing - Inventory": "LI", "Digital Marketing": "DM", "IT - Software Development": "IT",
         "Finance": "FN", "Book Fair - Events": "BF", "Books and Supply Procurement": "BP", "HR": "HR",
-        "Data Analysis": "DA", "Software Testing": "ST", "Product Development": "PD"
+        "Data Analysis": "DA", "Software Testing": "ST", "Product Development": "PD",
+        "Business Development": "BD", "General Admin": "GA"
     };
-    return codes[department] || "DP";
+    if (codes[department]) return codes[department];
+    // [v8] New departments: initials of the main words, e.g. "Quality Control" → QC
+    const words = String(department || "").replace(/[^A-Za-z0-9 ]+/g, " ").split(/\s+/)
+        .filter(function (w) { return w && !/^(and|of|the|&)$/i.test(w); });
+    if (!words.length) return "DP";
+    if (words.length === 1) return words[0].substring(0, 2).toUpperCase();
+    return words.slice(0, 3).map(function (w) { return w[0]; }).join("").toUpperCase();
 }
 
 function showNotification(title, message) {
@@ -2353,6 +2432,12 @@ function initializeRegularTasksPage() {
         const toggle = event.target.closest(".section-toggle");
         if (toggle) {
             toggleSection(toggle.dataset.pageKey, toggle.dataset.sectionKey);
+            return;
+        }
+
+        const editButton = event.target.closest(".regular-task-edit-button");
+        if (editButton) {
+            if (typeof openRegularTaskModal === "function") openRegularTaskModal(editButton.dataset.regularTaskId);
             return;
         }
 
@@ -2506,6 +2591,7 @@ function createRegularTaskCard(task) {
                 ${lastUpdateLine(id)}
             </div>
             <div class="regular-task-card-actions">
+                ${isPrivilegedUser() ? `<button type="button" class="regular-task-edit-button" data-regular-task-id="${escapeHtml(id)}">Edit</button>` : ""}
                 <button type="button" class="regular-task-checklist-button" data-regular-task-id="${escapeHtml(id)}">
                     ${checklistStatusDot(id)} Checklist
                 </button>
@@ -2890,11 +2976,13 @@ function renderCommentsInto(taskId, threadElement) {
     threadElement.innerHTML = comments.map(function (c) {
         const when = c.pending ? "Sending…" : [displayDateSafe(c.date), c.time].filter(Boolean).join(", ");
         const mine = normalizePersonName(c.user) === normalizePersonName(currentUserLabel());
+        const canDelete = isPrivilegedUser() && !c.pending;
         return `
             <div class="comment-bubble${c.pending ? " is-pending" : ""}${mine ? " is-mine" : ""}">
                 <div class="comment-bubble-head">
                     <span class="comment-bubble-author">${escapeHtml(c.user)}</span>
                     <span class="comment-bubble-date">${escapeHtml(when)}</span>
+                    ${canDelete ? `<button type="button" class="comment-delete" data-task-id="${escapeHtml(String(taskId))}" data-comment-id="${escapeHtml(c.commentId)}" aria-label="Delete comment" title="Delete comment">×</button>` : ""}
                 </div>
                 <div class="comment-bubble-text">${escapeHtml(c.comment)}</div>
             </div>
@@ -3082,6 +3170,8 @@ function fillTaskDetailDrawer(task) {
 
     const saveMetaButton = document.getElementById("taskDetailSaveMetaButton");
     const lockedNote = document.getElementById("taskDetailLockedNote");
+    const deleteButton = document.getElementById("taskDetailDeleteButton");
+    if (deleteButton) deleteButton.style.display = privileged ? "block" : "none";
     if (saveMetaButton) saveMetaButton.style.display = privileged ? "block" : "none";
     if (lockedNote) lockedNote.style.display = privileged ? "none" : "block";
 
@@ -3178,6 +3268,10 @@ function openBacklogItemModal(item = null) {
     setInput("backlogStatus", item ? (String(item.status).toLowerCase() === "paused" ? "Paused" : "Backlog") : "Backlog");
     setInput("backlogDescription", item ? item.description : "");
     setInput("backlogExpectedDate", item ? item.expectedDate : "");
+    setInput("backlogPriority", item && item.priority ? item.priority : "Medium");
+
+    const deleteButton = document.getElementById("deleteBacklogButton");
+    if (deleteButton) deleteButton.style.display = item && isPrivilegedUser() ? "" : "none";
 
     modal.style.display = "flex";
     document.body.classList.add("modal-open");
@@ -3203,6 +3297,7 @@ async function saveBacklogItemFromForm() {
         task: title,
         department: getInput("backlogDepartment"),
         status: getInput("backlogStatus") || "Backlog",
+        priority: getInput("backlogPriority") || "Medium",
         description: getInput("backlogDescription"),
         expectedDate: getInput("backlogExpectedDate")
     };
