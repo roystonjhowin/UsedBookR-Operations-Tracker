@@ -1,5 +1,11 @@
 /* =========================================================
-   EXCELSO OPERATIONS MANAGEMENT SYSTEM — FRONTEND  (v8)
+   EXCELSO OPERATIONS MANAGEMENT SYSTEM — FRONTEND  (v9)
+
+   v9: Founder / Operations Head can move work between All Tasks,
+   Regular Tasks and Backlog (moves.js), the AI can propose tasks
+   in chat and in a follow-up chat after "Find tasks in notes"
+   (ai.js), and screens redraw at most once per frame so the app
+   stays smooth.
 
    v8: departments come from the "lists" sheet (no more hardcoded
    list), Founder / Operations Head get delete buttons on tasks,
@@ -44,7 +50,7 @@ let DEPARTMENTS = [
 
 const STATUS_ON_HOLD = "On Hold";
 
-const APP_VERSION = "8.0";
+const APP_VERSION = "9.0";
 
 const POLL_INTERVAL_MS = 60 * 1000;        // look for other people's changes every minute
 const REFOCUS_REFRESH_MS = 30 * 1000;      // refresh when you come back after 30 s+
@@ -776,7 +782,7 @@ function showPage(page) {
     });
 
     updatePageHeader(page);
-    renderCurrentPage();
+    renderCurrentPageNow();
 
 }
 
@@ -801,7 +807,20 @@ function updatePageHeader(page) {
 
 }
 
+/* [v9 SPEED] Many actions ask for a redraw at once (save, then refresh,
+   then close a drawer). They are merged into one redraw per frame. */
+let renderScheduled = false;
+
 function renderCurrentPage() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(function () {
+        renderScheduled = false;
+        renderCurrentPageNow();
+    });
+}
+
+function renderCurrentPageNow() {
 
     switch (currentPage) {
         case "dashboard": updateDashboard(); break;
@@ -934,7 +953,9 @@ const NON_IDEMPOTENT_ACTIONS = new Set([
     "aiAsk", "aiExtractTasks", "createTasksBulk", "createRegularTask",
     "addTeamMember", "addDepartment", "saveKnowledgeNote", "clearActivityLog",
     "deleteComment", "deleteBacklogTask", "deleteRegularTask", "deleteTeamMember",
-    "deleteKnowledgeNote", "removeDepartment", "renameDepartment", "updateTeamMember"
+    "deleteKnowledgeNote", "removeDepartment", "renameDepartment", "updateTeamMember",
+    "aiExtractFollowup", "moveTaskToBacklog", "moveTaskToRegular", "moveRegularToBacklog",
+    "copyRegularToTask", "moveBacklogToTaskV9"
 ]);
 
 const REQUEST_TIMEOUT_MS = 30000;
@@ -1427,10 +1448,6 @@ function createOwnerPicker(root) {
 
     root.querySelector(".owner-picker-done").addEventListener("click", function () { close(); trigger.focus(); });
 
-    document.addEventListener("mousedown", function (event) {
-        if (root.classList.contains("is-open") && !root.contains(event.target)) close();
-    });
-
     const api = {
         getValue: function () { return joinOwners(selected); },
         getList: function () { return selected.slice(); },
@@ -1463,6 +1480,15 @@ function createOwnerPicker(root) {
     return api;
 
 }
+
+/* [v9 SPEED] One page-wide listener closes open pickers, instead of
+   one listener per picker (those piled up on the AI cards). */
+document.addEventListener("mousedown", function (event) {
+    const open = document.querySelectorAll(".owner-picker.is-open");
+    for (let i = 0; i < open.length; i++) {
+        if (!open[i].contains(event.target) && open[i]._picker) open[i]._picker.close();
+    }
+});
 
 function initializeOwnerPickers() {
     taskOwnerPicker = createOwnerPicker(document.getElementById("taskOwnerPicker"));
@@ -2083,6 +2109,7 @@ function closeAllOverlays() {
     closeRegularTaskChecklistDrawer();
     if (taskDetailCurrentId) closeTaskDetailDrawer();
     if (typeof closeAdminModals === "function") closeAdminModals();
+    if (typeof closeMoveModal === "function") closeMoveModal();
 }
 
 function initializeTaskForm() {
@@ -2108,6 +2135,8 @@ function openTaskModal(task = null) {
 
     const deleteButton = document.getElementById("deleteTaskModalButton");
     if (deleteButton) deleteButton.style.display = task && isPrivilegedUser() ? "" : "none";
+    const moveButton = document.getElementById("moveTaskModalButton");
+    if (moveButton) moveButton.style.display = task && isPrivilegedUser() ? "" : "none";
 
     if (task) {
         editingTaskId = task.taskId;
@@ -3172,6 +3201,8 @@ function fillTaskDetailDrawer(task) {
     const lockedNote = document.getElementById("taskDetailLockedNote");
     const deleteButton = document.getElementById("taskDetailDeleteButton");
     if (deleteButton) deleteButton.style.display = privileged ? "block" : "none";
+    const moveButton = document.getElementById("taskDetailMoveButton");
+    if (moveButton) moveButton.style.display = privileged ? "flex" : "none";
     if (saveMetaButton) saveMetaButton.style.display = privileged ? "block" : "none";
     if (lockedNote) lockedNote.style.display = privileged ? "none" : "block";
 
@@ -3189,7 +3220,8 @@ function closeTaskDetailDrawer() {
     taskDetailOwnerPicker?.close();
     taskDetailCurrentId = "";
 
-    renderCurrentPage();
+    // [v9 SPEED] Saves inside the drawer already redraw the page,
+    // so closing it doesn't need another full redraw.
 
 }
 
@@ -3272,6 +3304,8 @@ function openBacklogItemModal(item = null) {
 
     const deleteButton = document.getElementById("deleteBacklogButton");
     if (deleteButton) deleteButton.style.display = item && isPrivilegedUser() ? "" : "none";
+    const moveButton = document.getElementById("moveBacklogModalButton");
+    if (moveButton) moveButton.style.display = item && isPrivilegedUser() ? "" : "none";
 
     modal.style.display = "flex";
     document.body.classList.add("modal-open");
