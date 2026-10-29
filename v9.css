@@ -1,0 +1,546 @@
+/* =========================================================
+   EXCELSO v9 — layout, alignment and smoothness
+   Loaded LAST, after style.css / enhancements.css / polish.css /
+   features.css. Keeps the ledger-green + paper + gold identity and:
+   - lines everything up on one spacing scale
+   - gives every button, input and card the same sizes
+   - turns modals into bottom sheets and drawers into full screens
+     on phones
+   - removes blur effects and looping animations that cause lag
+   - styles the v9 features (move dialog, AI task cards, follow-up)
+========================================================= */
+
+:root {
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+
+    --control-h: 40px;
+    --control-h-sm: 34px;
+    --control-radius: 10px;
+    --card-radius: 14px;
+    --panel-radius: 16px;
+
+    --content-max: 1440px;
+    --page-pad: clamp(16px, 2.6vw, 32px);
+}
+
+/* ---------------------------------------------------------
+   1. SMOOTHNESS
+   Blur behind overlays and endlessly running decorations are the
+   main causes of jank on mid-range phones and laptops.
+--------------------------------------------------------- */
+
+html { scroll-behavior: auto; -webkit-text-size-adjust: 100%; }
+
+[hidden] { display: none !important; }
+
+*, *::before, *::after { -webkit-tap-highlight-color: transparent; }
+
+button, a, label, select, summary, [role="button"], input[type="checkbox"], input[type="radio"] { touch-action: manipulation; }
+
+.topbar, .modal-overlay, .detail-drawer-overlay, .regular-task-update-modal-overlay,
+.sidebar-backdrop, .notification, .action-loader, .mobile-tabbar {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+}
+
+.topbar { background: rgba(255, 255, 255, 0.97); }
+.modal-overlay, .detail-drawer-overlay, .regular-task-update-modal-overlay { background: rgba(13, 43, 28, 0.6); }
+
+.topbar::after, .sidebar-header::after, .login-aurora, .login-card::before, .login-card::after,
+.input-shell:focus-within::after, .checklist-dot-red { animation: none !important; }
+
+/* Cards no longer animate in one by one on every redraw */
+.kpi-card, .regular-task-group, .regular-task-card, .backlog-card, .bookfair-card, .department-card,
+.extract-card, tbody tr, .activity-item, .comment-bubble { animation: none !important; }
+
+/* Page switch: a quick fade only (no movement = no layout shift) */
+.page.active-page { animation: v9-fade 0.16s ease-out both; }
+@keyframes v9-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Hover lifts only where there is a mouse */
+@media (hover: none) {
+    .kpi-card:hover, .backlog-card:hover, .bookfair-card:hover, .regular-task-card:hover, .department-card:hover,
+    .primary-button:hover, .secondary-button:hover, .top-add-button:hover, .panel:hover { transform: none !important; box-shadow: var(--shadow-sm); }
+    .primary-button::before, .top-add-button::before { display: none; }
+}
+
+.panel:hover { box-shadow: var(--shadow-sm); }
+
+/* Long lists: the browser skips painting rows that are off screen */
+.regular-task-card, .backlog-card, .bookfair-card, .extract-card:not(.is-new) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 220px;
+}
+
+/* Scroll inside windows without dragging the page behind */
+.modal, .detail-drawer-panel, .sidebar, .ai-messages, .owner-picker-options, .extract-followup-thread { overscroll-behavior: contain; }
+
+/* ---------------------------------------------------------
+   2. PAGE FRAME
+--------------------------------------------------------- */
+
+.content-area {
+    width: 100%;
+    max-width: var(--content-max);
+    margin: 0 auto;
+    padding: var(--space-6) var(--page-pad) 48px;
+}
+
+.topbar {
+    min-height: 68px;
+    padding: 12px var(--page-pad);
+    gap: var(--space-4);
+}
+.topbar-left { min-width: 0; gap: var(--space-3); }
+.topbar-left > div { min-width: 0; }
+.topbar-left h1 { font-size: 20px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-right { gap: var(--space-2); flex-shrink: 0; }
+.topbar-right > * { flex-shrink: 0; }
+
+.top-add-button, .sync-button, .scope-toggle { min-height: var(--control-h-sm); }
+.top-add-button { display: inline-flex; align-items: center; gap: 4px; border-radius: var(--control-radius); padding: 0 14px; }
+
+/* Page header: title block on the left, actions on the right, bottoms aligned */
+.page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-4) var(--space-6);
+    margin-bottom: var(--space-5);
+}
+.page-header > div:first-child { min-width: 0; flex: 1 1 320px; }
+.page-header h2 { font-size: clamp(22px, 2.2vw, 27px); line-height: 1.15; }
+.page-header p { max-width: 62ch; line-height: 1.5; }
+.page-header > .primary-button,
+.page-header > .secondary-button,
+.page-header-actions { flex-shrink: 0; }
+.page-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.page-header-actions select { min-height: var(--control-h); border-radius: var(--control-radius); }
+
+.dashboard-hero { align-items: center; padding: var(--space-6); }
+
+/* Sections and panels share one radius and one gap */
+.panel { border-radius: var(--panel-radius); margin-bottom: var(--space-5); }
+.panel-header { align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); }
+.panel-header > div { min-width: 0; }
+
+.dashboard-columns { gap: var(--space-5); }
+.dashboard-columns > .panel { margin-bottom: 0; }
+.dashboard-columns { margin-bottom: var(--space-5); }
+
+.kpi-grid { gap: var(--space-3); margin-bottom: var(--space-5); }
+.kpi-card { border-radius: var(--card-radius); min-width: 0; }
+.kpi-card strong { font-variant-numeric: tabular-nums; }
+
+/* Filters: search gets more room, the rest share the row */
+.filter-panel {
+    display: grid;
+    grid-template-columns: minmax(220px, 2fr) repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--space-3);
+    align-items: end;
+    padding: var(--space-4);
+    border-radius: var(--panel-radius);
+    margin-bottom: var(--space-5);
+}
+.filter-panel .filter-field { min-width: 0; }
+.filter-panel:has(> .filter-field:only-child) { grid-template-columns: minmax(220px, 360px); }
+
+/* ---------------------------------------------------------
+   3. CONTROLS — one height, one radius
+--------------------------------------------------------- */
+
+.primary-button, .secondary-button, .danger-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: var(--control-h);
+    padding: 0 16px;
+    border-radius: var(--control-radius);
+    font-size: 13px;
+    line-height: 1.1;
+    white-space: nowrap;
+    text-align: center;
+}
+.primary-button:disabled, .secondary-button:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; filter: none; }
+.secondary-button-block, .danger-button-block { width: 100%; }
+.secondary-button-block { margin-top: var(--space-2); white-space: normal; }
+
+.table-action, .regular-task-update-button, .regular-task-checklist-button, .regular-task-edit-button {
+    min-height: var(--control-h-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+
+.form-group input, .form-group select, .filter-field input, .filter-field select,
+.meta-field input, .meta-field select, .extract-card select, .extract-card input[type="date"] {
+    min-height: var(--control-h);
+    border-radius: var(--control-radius);
+}
+.meta-field input, .meta-field select { min-height: 36px; }
+.form-group textarea { border-radius: var(--control-radius); line-height: 1.5; }
+
+/* ---------------------------------------------------------
+   4. TABLES
+--------------------------------------------------------- */
+
+.table-container { -webkit-overflow-scrolling: touch; }
+th { white-space: nowrap; }
+td { line-height: 1.4; }
+td.cell-title { min-width: 220px; }
+td.cell-title strong { font-weight: 650; }
+.owners-cell { min-width: 120px; }
+.owners-cell .owner-chip { margin: 2px 4px 2px 0; }
+td.cell-action { text-align: right; white-space: nowrap; }
+tr.row-clickable { cursor: pointer; }
+@media (hover: hover) {
+    tr.row-clickable:hover td { background: #fbfaf5; }
+}
+
+/* ---------------------------------------------------------
+   5. CARD GRIDS — equal heights, actions pinned to the bottom
+--------------------------------------------------------- */
+
+.regular-task-list, .backlog-grid, .bookfair-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+    gap: var(--space-4);
+    align-items: stretch;
+}
+.regular-task-list { padding: var(--space-4) var(--space-5) var(--space-5); }
+.backlog-grid, .bookfair-grid { padding: 0; }
+
+.regular-task-card, .backlog-card, .bookfair-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+    border-radius: var(--card-radius);
+}
+.regular-task-card-main { display: flex; flex-direction: column; gap: var(--space-2); flex: 1; min-width: 0; }
+.regular-task-card h3, .backlog-card h3, .bookfair-card h3 { line-height: 1.3; overflow-wrap: anywhere; }
+.regular-task-details { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.regular-task-card-actions { margin-top: auto; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.regular-task-card-actions > button { flex: 1 1 auto; }
+.backlog-card-footer { margin-top: auto; }
+.backlog-card-description { overflow-wrap: anywhere; }
+
+.regular-task-group { border-radius: var(--panel-radius); }
+
+.departments-grid { gap: var(--space-4); }
+
+/* ---------------------------------------------------------
+   6. MODALS — header and footer stay put, the middle scrolls
+--------------------------------------------------------- */
+
+.modal-overlay { padding: var(--space-5); }
+
+.modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: min(92vh, 940px);
+    max-height: min(92dvh, 940px);
+    overflow: hidden;
+    border-radius: 18px;
+}
+.modal-header { flex-shrink: 0; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-6); }
+.modal-header > div { min-width: 0; }
+.modal-header h2 { line-height: 1.2; overflow-wrap: anywhere; }
+.modal-label { margin-bottom: 2px; }
+.modal-close { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+
+.modal > form, #taskForm, #backlogItemForm, .modal-form {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: var(--space-5) var(--space-6) 0;
+}
+
+.form-grid { gap: var(--space-4) var(--space-5); }
+.form-grid > * { min-width: 0; }
+
+.modal-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    margin: var(--space-5) calc(-1 * var(--space-6)) 0;
+    padding: var(--space-3) var(--space-6);
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    align-items: center;
+    gap: var(--space-2);
+}
+
+/* Regular-task "log update" sheet */
+.regular-task-update-modal-card { max-height: min(92dvh, 900px); overflow-y: auto; border-radius: 18px; }
+
+/* ---------------------------------------------------------
+   7. DETAIL DRAWER — roomier details column
+--------------------------------------------------------- */
+
+.detail-drawer-body { grid-template-columns: minmax(0, 1fr) 270px; }
+.detail-drawer-body-single { grid-template-columns: minmax(0, 1fr); }
+.detail-drawer-main { padding: var(--space-8) var(--space-8) var(--space-6); min-width: 0; }
+.detail-drawer-main h2 { padding-right: 44px; line-height: 1.25; overflow-wrap: anywhere; }
+.detail-drawer-meta { padding: var(--space-8) var(--space-5) var(--space-6); gap: var(--space-3); }
+.detail-drawer-meta .primary-button { width: 100%; }
+.drawer-admin-actions { flex-wrap: wrap; gap: var(--space-2); }
+.detail-drawer-close { display: inline-flex; align-items: center; justify-content: center; }
+
+/* ---------------------------------------------------------
+   8. AI ASSISTANT
+--------------------------------------------------------- */
+
+.ai-chat { margin-bottom: 0; }
+.ai-messages { scroll-behavior: auto; }
+.ai-msg { flex-direction: column; }
+.ai-msg-user { align-items: flex-end; }
+.ai-msg-assistant { align-items: flex-start; }
+.ai-bubble { max-width: min(760px, 92%); overflow-wrap: anywhere; }
+.ai-composer textarea { min-height: 44px; }
+
+/* Task cards proposed in the chat */
+.ai-proposals {
+    width: 100%;
+    max-width: 980px;
+    margin-top: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+.ai-proposal-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--space-3); }
+.ai-proposals-bar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3);
+    padding: 10px 12px 10px 16px; border-radius: 12px;
+    background: var(--forest-deep); color: #fff; font-size: 13px; font-weight: 600;
+}
+.ai-proposals-bar .primary-button { background: var(--gold-soft); color: var(--forest-deep); box-shadow: none; min-height: var(--control-h-sm); }
+.ai-proposals-hint { font-size: 11.5px; color: var(--muted); }
+
+.extract-card { opacity: 1; }
+.extract-card:not(.is-selected):not(.is-added):not(.is-dismissed) { opacity: 0.8; }
+.extract-card.is-chat { border-color: #cfe5d6; }
+.extract-card-head { flex-wrap: wrap; }
+.extract-card-head .extract-destination { margin-left: auto; min-height: var(--control-h-sm); }
+.extract-card-foot { flex-wrap: wrap; }
+.extract-card-foot .extract-card-error { flex: 1 1 140px; }
+.extract-card-foot .primary-button, .extract-card-foot .secondary-button { min-height: var(--control-h-sm); }
+.extract-field-owners .owner-picker { min-width: 0; }
+
+.proposal-tag {
+    display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px;
+    background: rgba(31, 109, 69, 0.1); color: var(--forest-dark); font-size: 11.5px; font-weight: 700;
+}
+.proposal-tag-new { background: rgba(184, 145, 47, 0.16); color: #7a5d17; }
+
+.extract-card.is-dismissed {
+    flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-3);
+    padding: 12px 16px; background: var(--surface-alt); border-style: dashed; box-shadow: none; opacity: 1;
+}
+.extract-dismissed-text { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.extract-card.is-new { animation: v9-flash 1.6s ease-out 1 !important; }
+@keyframes v9-flash {
+    0%, 30% { box-shadow: 0 0 0 3px var(--gold-soft); }
+    100% { box-shadow: var(--shadow-sm); }
+}
+
+/* Follow-up chat under "Find tasks in notes" */
+.extract-followup { padding: 0; margin-top: var(--space-1); }
+.extract-followup-head { padding: var(--space-5) var(--space-5) var(--space-3); }
+.extract-followup-head h3 { font-family: var(--font-display); font-size: 18px; font-weight: 600; color: var(--ink); }
+.extract-followup-head p { margin-top: 4px; font-size: 13px; line-height: 1.55; color: var(--muted); max-width: 72ch; }
+.extract-followup-thread {
+    display: flex; flex-direction: column; gap: var(--space-3);
+    max-height: 420px; overflow-y: auto;
+    padding: var(--space-2) var(--space-5) var(--space-4);
+}
+.extract-followup-composer { border-top: 1px solid var(--border); padding: var(--space-3) var(--space-5) var(--space-4); }
+.followup-added { margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--forest-dark); }
+
+/* ---------------------------------------------------------
+   9. MOVE / COPY DIALOG
+--------------------------------------------------------- */
+
+.move-source {
+    margin-bottom: var(--space-4);
+    font-family: var(--font-display);
+    font-size: 17px;
+    line-height: 1.35;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+.move-options { display: grid; gap: var(--space-2); margin-bottom: var(--space-4); }
+.move-option { position: relative; display: block; cursor: pointer; }
+.move-option input { position: absolute; opacity: 0; pointer-events: none; }
+.move-option-body {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 12px 14px 12px 44px; border-radius: 12px;
+    border: 1.5px solid var(--border); background: var(--surface-alt);
+    transition: border-color 0.12s, background-color 0.12s;
+}
+.move-option-body::before {
+    content: ""; position: absolute; left: 15px; top: 15px; width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid #c9c4b4; background: var(--surface); box-sizing: border-box;
+}
+.move-option-body strong { font-size: 14px; color: var(--ink); }
+.move-option-body span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.move-option input:checked + .move-option-body { border-color: var(--forest); background: rgba(31, 109, 69, 0.06); }
+.move-option input:checked + .move-option-body::before { border: 5px solid var(--forest); }
+.move-option input:focus-visible + .move-option-body { box-shadow: 0 0 0 3px rgba(47, 138, 91, 0.25); }
+@media (hover: hover) { .move-option:hover .move-option-body { border-color: var(--forest-mid); } }
+.move-fields { margin-bottom: var(--space-2); }
+.move-note {
+    font-size: 12px; line-height: 1.5; color: #7a5d17;
+    background: #fbf6e8; border: 1px solid #efdcae; border-radius: 10px; padding: 9px 12px; margin-top: var(--space-2);
+}
+
+/* ---------------------------------------------------------
+   10. TABLET (≤ 1100px)
+--------------------------------------------------------- */
+
+@media (max-width: 1100px) {
+    .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .detail-drawer-body { grid-template-columns: minmax(0, 1fr) 240px; }
+}
+
+@media (max-width: 900px) {
+    .topbar { min-height: 60px; }
+    #currentDate { display: none; }
+    .dashboard-columns { grid-template-columns: 1fr; }
+    .content-area { padding-bottom: 32px; }
+    .sidebar { will-change: transform; }
+}
+
+/* ---------------------------------------------------------
+   11. PHONES (≤ 700px)
+--------------------------------------------------------- */
+
+@media (max-width: 700px) {
+
+    :root { --page-pad: 14px; --control-h: 44px; }
+
+    /* 16px text in inputs stops iPhones from zooming in on tap */
+    input, select, textarea, .form-group input, .form-group select, .form-group textarea,
+    .filter-field input, .filter-field select, .ai-composer textarea, .extract-card input, .extract-card select, .extract-card textarea {
+        font-size: 16px !important;
+    }
+
+    .content-area { padding-top: var(--space-4); }
+    .topbar { padding: 10px var(--page-pad); }
+    .topbar-left h1 { font-size: 17px; }
+
+    .page-header { align-items: stretch; margin-bottom: var(--space-4); }
+    .page-header > div:first-child { flex-basis: 100%; }
+    .page-header > .primary-button, .page-header > .secondary-button { width: 100%; }
+    .page-header-actions { width: 100%; }
+    .page-header-actions > * { flex: 1 1 0; }
+    .page-label { margin-bottom: 4px; }
+
+    .dashboard-hero { padding: var(--space-5); border-radius: var(--panel-radius); }
+
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+
+    .filter-panel { grid-template-columns: 1fr 1fr; padding: var(--space-3); gap: 10px; }
+    .filter-panel .filter-field:first-child { grid-column: 1 / -1; }
+    .filter-panel:has(> .filter-field:only-child) { grid-template-columns: 1fr; }
+
+    .panel { border-radius: 14px; }
+    .panel-header { padding: var(--space-3) var(--space-4); flex-wrap: wrap; }
+
+    .regular-task-list { padding: var(--space-3); gap: var(--space-3); }
+    .backlog-grid, .bookfair-grid { gap: var(--space-3); }
+
+    /* Stacked table cards (from style.css) — tidy spacing */
+    .table-container tbody tr:not(.table-section-row):not(.skeleton-row) { margin: 8px 10px; padding: 12px; border-radius: 12px; }
+    .table-container td.cell-action .table-action { min-height: 40px; }
+    td.cell-title { min-width: 0; }
+    td.cell-action { text-align: left; }
+
+    /* Modals become bottom sheets */
+    .modal-overlay { align-items: flex-end; padding: 0; }
+    .modal, .modal-narrow, .modal-wide {
+        max-width: none;
+        width: 100%;
+        max-height: 94vh;
+        max-height: 94dvh;
+        border-radius: 18px 18px 0 0;
+        animation: v9-sheet-up 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    .modal-header { padding: var(--space-3) var(--space-4); }
+    .modal-header h2 { font-size: 18px; }
+    .modal > form, #taskForm, #backlogItemForm, .modal-form { padding: var(--space-4) var(--space-4) 0; }
+    .form-grid { grid-template-columns: 1fr; gap: var(--space-3); }
+    .modal-footer { margin: var(--space-4) calc(-1 * var(--space-4)) 0; padding-left: var(--space-4); padding-right: var(--space-4); }
+    .modal-footer > button { flex: 1 1 auto; }
+    .modal-footer .modal-footer-left { flex: 1 1 100%; order: 3; margin-right: 0; }
+
+    .regular-task-update-modal-card { width: 100%; max-width: none; border-radius: 18px 18px 0 0; position: absolute; bottom: 0; left: 0; right: 0; }
+
+    /* Drawers fill the screen */
+    .detail-drawer-panel, .detail-drawer-panel-single { width: 100%; animation: v9-sheet-up 0.22s cubic-bezier(0.22, 1, 0.36, 1) both; }
+    .detail-drawer-body { grid-template-columns: 1fr; }
+    .detail-drawer-main { padding: var(--space-5) var(--space-4); border-right: none; }
+    .detail-drawer-meta { padding: var(--space-5) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)); }
+    .detail-drawer-close { top: 12px; right: 12px; width: 40px; height: 40px; }
+    .drawer-admin-actions > button { flex: 1 1 auto; }
+
+    /* AI */
+    .ai-tabs { width: 100%; }
+    .ai-tab { flex: 1 0 auto; padding: 10px 12px; }
+    .ai-bubble { max-width: 100%; }
+    .ai-composer { padding: 10px 12px 6px; }
+    .ai-composer .primary-button { padding: 0 16px; }
+    .ai-composer-hint { padding: 2px 12px 10px; }
+    .extract-list, .ai-proposal-list { grid-template-columns: 1fr; }
+    .extract-card-grid { grid-template-columns: 1fr 1fr; }
+    .extract-field-owners { grid-column: 1 / -1; }
+    .extract-options { grid-template-columns: 1fr; }
+    .extract-actions > button { flex: 1 1 0; }
+    .extract-bulk-bar { flex-wrap: wrap; top: 4px; }
+    .extract-followup-head, .extract-followup-thread { padding-left: var(--space-4); padding-right: var(--space-4); }
+    .extract-followup-composer { padding: var(--space-3) var(--space-4); }
+    .kb-toolbar { flex-wrap: wrap; }
+    .kb-toolbar > * { flex: 1 1 140px; }
+}
+
+@keyframes v9-sheet-up { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+
+@media (max-width: 380px) {
+    .kpi-card strong { font-size: 21px; }
+    .regular-task-card-actions > button { flex: 1 1 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .page.active-page, .modal, .detail-drawer-panel, .extract-card.is-new { animation: none !important; }
+}
+
+/* Finished / dismissed cards keep their own height in the grid */
+.ai-proposal-list, .extract-list { align-items: start; }
+.extract-card.is-added { align-self: start; }
+
+/* Phones: Save on top, secondary buttons in pairs, delete last */
+@media (max-width: 700px) {
+    .modal-footer { display: grid; grid-template-columns: 1fr 1fr; }
+    .modal-footer > button[style*="display: none"], .modal-footer > button[style*="display:none"] { display: none !important; }
+    .modal-footer > .primary-button { grid-column: 1 / -1; order: -1; }
+    .modal-footer > .modal-footer-left { grid-column: 1 / -1; order: 5; }
+    .modal-footer > button { width: 100%; }
+}
+@media (max-width: 700px) {
+    .modal-footer > button:first-child:nth-last-child(2) { grid-column: 1 / -1; }
+}
