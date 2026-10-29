@@ -1,5 +1,5 @@
 /* =========================================================
-   EXCELSO — ADMIN TOOLS (frontend)  —  v8
+   EXCELSO — ADMIN TOOLS (frontend)  —  v9
    Loaded after script.js and ai.js. Founder / Operations Head only
    (the server checks every action again).
 
@@ -242,6 +242,8 @@ function openRegularTaskModal(regularTaskId) {
 
     const del = document.getElementById("regularTaskDeleteButton");
     if (del) del.style.display = task ? "" : "none";
+    const move = document.getElementById("regularTaskMoveButton");
+    if (move) move.style.display = task ? "" : "none";
 
     openAdminModal("regularTaskModal");
     setTimeout(function () { document.getElementById("regularTaskName")?.focus(); }, 50);
