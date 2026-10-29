@@ -1,5 +1,12 @@
 /* =========================================================
-   EXCELSO — AI FEATURES (frontend)  —  v8
+   EXCELSO — AI FEATURES (frontend)  —  v9
+
+   v9 adds, for the Founder / Operations Head:
+   - Task cards in the chat: say "add a task for …", paste a
+     transcript, or say a task was missed — the AI prepares cards
+     you approve with one click (or by replying "yes, add them").
+   - A follow-up chat under "Find tasks in notes" results, so you
+     can tell the AI what it missed and get new cards to approve.
    Loaded after script.js and uses its helpers (apiRequest,
    tasks, currentUser, openTaskDetailDrawer, ...).
 
@@ -242,13 +249,26 @@ function setAiTab(tab) {
     if (newChat) newChat.style.display = tab === "chat" ? "" : "none";
 
     const intro = {
-        chat: "Ask about tasks, updates, deadlines, changes or team performance. Answers come from the live data in Excelso.",
+        chat: isPrivilegedUser()
+            ? "Ask about tasks, updates, deadlines or team performance — or ask it to add a task. Task cards wait for your approval before anything is saved."
+            : "Ask about tasks, updates, deadlines, changes or team performance. Answers come from the live data in Excelso.",
         extract: "Add a meeting transcript or a WhatsApp chat. The AI lists the tasks that were discussed or assigned — check them, edit them, and add the ones you want.",
         kb: "General info, important notes, meeting notes and guidelines. The AI Assistant answers from these when you ask."
     };
     setText("aiPageIntro", intro[tab]);
 
-    if (tab === "chat") { renderAiMessages(); setTimeout(function () { document.getElementById("aiInput")?.focus(); }, 50); }
+    if (tab === "chat") {
+        setText("aiComposerHint", isPrivilegedUser()
+            ? "Enter to send, Shift+Enter for a new line. Try \"Add a task for Bhuvana to send the Madurai stock list by Friday\"."
+            : "Enter to send, Shift+Enter for a new line. Click a task or note ID in an answer to open it.");
+        const input = document.getElementById("aiInput");
+        if (input) input.placeholder = isPrivilegedUser()
+            ? "Ask a question, ask for a task, or paste a transcript…"
+            : "e.g. What is overdue in Warehouse and who owns it?";
+        renderAiMessages();
+        // Don't pop the phone keyboard up just because the tab opened.
+        if (!window.matchMedia("(pointer: coarse)").matches) setTimeout(function () { input?.focus(); }, 50);
+    }
     if (tab === "kb") loadKnowledgeBase(false);
 
 }
@@ -259,7 +279,7 @@ function renderAiPage() {
     setAiTab(aiTab);
 }
 
-function renderAiMessages() {
+function renderAiMessages(options = {}) {
 
     const box = document.getElementById("aiMessages");
     if (!box) return;
@@ -269,9 +289,9 @@ function renderAiMessages() {
         box.innerHTML = `
             <div class="ai-welcome">
                 <h3>${first ? "Hi " + escapeHtml(first) + ", w" : "W"}hat would you like to know?</h3>
-                <p>I can read every task, checklist, comment, regular-task update, the activity log and the backlog${isPrivilegedUser() ? ", plus the knowledge base" : ""}.</p>
+                <p>I can read every task, checklist, comment, regular-task update, the activity log and the backlog${isPrivilegedUser() ? ", plus the knowledge base. You can also ask me to add a task, or paste a meeting transcript — I'll prepare task cards for you to approve" : ""}.</p>
                 <div class="ai-suggestions">
-                    ${(isPrivilegedUser() ? AI_SUGGESTIONS.slice(0, 4).concat(AI_ADMIN_SUGGESTIONS) : AI_SUGGESTIONS).map(function (q) {
+                    ${(isPrivilegedUser() ? AI_SUGGESTIONS.slice(0, 3).concat(AI_ADMIN_SUGGESTIONS) : AI_SUGGESTIONS).map(function (q) {
                         return `<button type="button" class="ai-suggestion" data-question="${escapeHtml(q)}">${escapeHtml(q)}</button>`;
                     }).join("")}
                 </div>
@@ -280,20 +300,101 @@ function renderAiMessages() {
         return;
     }
 
-    box.innerHTML = aiMessages.map(function (m) {
+    const previousScroll = box.scrollTop;
+
+    box.innerHTML = aiMessages.map(function (m, index) {
         if (m.role === "user") return `<div class="ai-msg ai-msg-user"><div class="ai-bubble">${escapeHtml(m.content)}</div></div>`;
         if (m.role === "error") {
             return `<div class="ai-msg ai-msg-error"><div class="ai-bubble">${escapeHtml(m.content)}
                 <button type="button" class="ai-retry">Try again</button></div></div>`;
         }
-        return `<div class="ai-msg ai-msg-assistant"><div class="ai-bubble ai-answer">${renderMarkdownLite(m.content)}</div></div>`;
+        return `<div class="ai-msg ai-msg-assistant"><div class="ai-bubble ai-answer">${renderMarkdownLite(m.content)}</div>${proposalsBlockHtml(m, index)}</div>`;
     }).join("") + (aiBusy ? `
         <div class="ai-msg ai-msg-assistant">
-            <div class="ai-bubble ai-thinking"><span class="ai-dots"><i></i><i></i><i></i></span> Reading tasks and updates…</div>
+            <div class="ai-bubble ai-thinking"><span class="ai-dots"><i></i><i></i><i></i></span> ${aiBusy === "creating" ? "Creating the tasks…" : "Reading tasks and updates…"}</div>
         </div>` : "");
 
-    box.scrollTop = box.scrollHeight;
+    mountProposalPickers(box);
 
+    box.scrollTop = options.keepScroll ? previousScroll : box.scrollHeight;
+
+}
+
+/* [v9] Task cards the AI proposed under an answer. */
+function proposalsBlockHtml(message, index) {
+
+    const list = message.proposals || [];
+    if (!list.length) return "";
+
+    const waiting = list.filter(function (p) { return p.status === "idle"; }).length;
+
+    return `
+        <div class="ai-proposals" data-msg-index="${index}">
+            ${waiting > 1 ? `
+                <div class="ai-proposals-bar">
+                    <span>${waiting} tasks waiting for your approval</span>
+                    <button type="button" class="primary-button ai-approve-all" data-msg-index="${index}">Approve all ${waiting}</button>
+                </div>` : ""}
+            <div class="ai-proposal-list">${list.map(extractCardHtml).join("")}</div>
+            ${waiting ? `<p class="ai-proposals-hint">Edit anything that's wrong, then approve. You can also reply "yes, add ${waiting === 1 ? "it" : "them"}".</p>` : ""}
+        </div>
+    `;
+
+}
+
+/* Owner pickers inside task cards are created after the HTML is in place. */
+function mountProposalPickers(container) {
+
+    container.querySelectorAll(".extract-card").forEach(function (card) {
+        const item = findProposalItem(card.dataset.key);
+        const root = card.querySelector("[data-owner-picker]");
+        if (!item || !root) return;
+        const picker = createOwnerPicker(root);
+        picker.setValue(joinOwners(item.owners || []));
+        if (item.status === "saving") picker.setDisabled(true);
+        extraOwnerPickers.push(picker);
+    });
+
+    for (let i = extraOwnerPickers.length - 1; i >= 0; i--) {
+        if (!document.body.contains(extraOwnerPickers[i].root)) extraOwnerPickers.splice(i, 1);
+    }
+
+}
+
+/* What the AI should remember about the cards it showed earlier. */
+function proposalsSummaryForHistory(message) {
+    const list = message.proposals || [];
+    if (!list.length) return "";
+    return "\n\n[Task cards shown to the user: " + list.map(function (p, i) {
+        const state = p.status === "added" ? "created as " + p.createdId
+            : p.status === "dismissed" ? "dismissed by the user" : "waiting for approval";
+        return (i + 1) + ") " + p.title + (p.owners && p.owners.length ? " — " + p.owners.join(", ") : "") +
+            (p.dueDate ? ", due " + p.dueDate : "") + (p.department ? ", " + p.department : "") + " → " + state;
+    }).join("; ") + "]";
+}
+
+/* Cards waiting for approval under the most recent answer. */
+function pendingChatProposals() {
+    for (let i = aiMessages.length - 1; i >= 0; i--) {
+        if (aiMessages[i].role === "assistant") {
+            return (aiMessages[i].proposals || []).filter(function (p) { return p.status === "idle"; });
+        }
+    }
+    return [];
+}
+
+/* "yes", "ok add them", "approve all" … but not "add the task about banners". */
+const APPROVAL_WORDS = new Set(["yes", "yep", "yeah", "yup", "ok", "okay", "sure", "fine", "perfect", "great", "approve",
+    "approved", "confirm", "confirmed", "go", "ahead", "do", "it", "looks", "good", "lgtm", "add", "create", "save",
+    "them", "this", "these", "all", "of", "the", "task", "tasks", "both", "please", "thanks", "thank", "you", "now", "and"]);
+const APPROVAL_TRIGGERS = new Set(["yes", "yep", "yeah", "yup", "ok", "okay", "sure", "approve", "approved", "confirm",
+    "confirmed", "go", "add", "create", "save", "lgtm", "good", "perfect", "fine", "great", "do"]);
+
+function isApprovalMessage(text) {
+    const words = String(text || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+    if (!words.length || words.length > 8) return false;
+    return words.every(function (w) { return APPROVAL_WORDS.has(w); }) &&
+        words.some(function (w) { return APPROVAL_TRIGGERS.has(w); });
 }
 
 async function sendAiQuestion(text) {
@@ -301,14 +402,33 @@ async function sendAiQuestion(text) {
     const question = String(text || "").trim();
     if (!question || aiBusy) return;
 
+    const limit = isPrivilegedUser() ? 60000 : 3000;
+    if (question.length > limit) {
+        return showNotification("Too long", "Keep it under " + limit.toLocaleString("en-IN") + " characters. For long transcripts use \"Find tasks in notes\".");
+    }
+
     const input = document.getElementById("aiInput");
     if (input) { input.value = ""; input.style.height = ""; }
+
+    // [v9] Typed approval ("yes, add them") creates the waiting cards straight away.
+    const pending = pendingChatProposals();
+    if (pending.length && isApprovalMessage(question)) {
+        aiMessages.push({ role: "user", content: question });
+        aiBusy = "creating";
+        renderAiMessages();
+        const outcome = await addExtractItems(pending, { quiet: true });
+        aiBusy = false;
+        aiMessages.push({ role: "assistant", content: approvalOutcomeText(outcome) });
+        renderAiMessages();
+        input?.focus();
+        return;
+    }
 
     // Previous turns (not errors) so follow-up questions have context.
     const history = aiMessages
         .filter(function (m) { return m.role === "user" || m.role === "assistant"; })
         .slice(-8)
-        .map(function (m) { return { role: m.role, content: m.content }; });
+        .map(function (m) { return { role: m.role, content: m.content + (m.role === "assistant" ? proposalsSummaryForHistory(m) : "") }; });
 
     aiMessages.push({ role: "user", content: question });
     aiBusy = true;
@@ -323,7 +443,11 @@ async function sendAiQuestion(text) {
     setButtonLoading(button, false);
 
     if (result && result.success) {
-        aiMessages.push({ role: "assistant", content: result.answer });
+        aiMessages.push({
+            role: "assistant",
+            content: result.answer,
+            proposals: toProposalItems(result.proposedTasks, "chat", "AI Assistant chat")
+        });
     } else {
         aiMessages.push({ role: "error", content: result?.message || "The AI couldn't answer just now.", question: question });
     }
@@ -331,6 +455,17 @@ async function sendAiQuestion(text) {
     renderAiMessages();
     input?.focus();
 
+}
+
+function approvalOutcomeText(outcome) {
+    if (!outcome) return "Nothing was created.";
+    const lines = [];
+    if (outcome.createdItems.length) {
+        lines.push("Created " + outcome.createdItems.map(function (i) { return i.createdId + " “" + i.title + "”"; }).join(", ") + ".");
+    }
+    if (outcome.invalid) lines.push(outcome.invalid + " still need" + (outcome.invalid === 1 ? "s" : "") + " details — fill in the highlighted card above and press Approve.");
+    if (outcome.failed) lines.push(outcome.failed + " couldn't be saved — see the message on the card.");
+    return lines.join(" ") || "Nothing was created.";
 }
 
 function retryLastAiQuestion() {
@@ -551,14 +686,53 @@ function filterWhatsAppSince(text, since) {
 
 /* =========================================================
    FIND TASKS IN NOTES (Founder / Operations Head)
+   v9: a follow-up chat under the results ("you missed …"),
+   and the same task cards are reused for proposals in the chat.
 ========================================================= */
 
 let extractState = null;
+let proposalSeq = 0;
 
 function resetExtractState() {
-    extractState = { sourceType: "meeting", fileName: "", pdfBase64: "", running: false, summary: "", savedNoteId: "", items: [], sourceLabel: "" };
+    extractState = {
+        sourceType: "meeting", fileName: "", pdfBase64: "", running: false, summary: "", savedNoteId: "", items: [], sourceLabel: "",
+        sourceText: "", sourcePdf: "", followup: [], followupBusy: false
+    };
 }
 resetExtractState();
+
+/* Cards the AI proposed live in two places: the task finder and chat answers. */
+function allProposalItems() {
+    const list = extractState.items.slice();
+    aiMessages.forEach(function (m) { if (m.proposals) list.push.apply(list, m.proposals); });
+    return list;
+}
+
+function findProposalItem(key) {
+    return allProposalItems().find(function (i) { return i.key === key; }) || null;
+}
+
+function findExtractItem(key) { return findProposalItem(key); }
+
+function toProposalItems(rawList, mode, sourceLabel, extra) {
+    return (rawList || []).map(function (t) {
+        proposalSeq++;
+        return Object.assign({}, t, {
+            key: (mode === "chat" ? "c" : "f") + Date.now().toString(36) + "-" + proposalSeq,
+            mode: mode,
+            sourceLabel: sourceLabel,
+            selected: !t.duplicateOf,
+            status: "idle",
+            error: "",
+            createdId: ""
+        }, extra || {});
+    });
+}
+
+function rerenderProposalItems(items) {
+    if (items.some(function (i) { return i.mode === "chat"; })) renderAiMessages({ keepScroll: true });
+    if (items.some(function (i) { return i.mode !== "chat"; })) renderExtractResults();
+}
 
 function initializeExtract() {
 
@@ -597,17 +771,18 @@ function initializeExtract() {
     }
 
     const textArea = document.getElementById("extractText");
-    textArea?.addEventListener("input", updateExtractCharCount);
+    textArea?.addEventListener("input", debounce(updateExtractCharCount, 120));
 
     document.getElementById("extractRunButton")?.addEventListener("click", runExtract);
     document.getElementById("extractClearButton")?.addEventListener("click", function () {
-        if (extractState.running) return;
+        if (extractState.running || extractState.followupBusy) return;
         const keepType = extractState.sourceType;
         resetExtractState();
         extractState.sourceType = keepType;
         setInput("extractText", "");
         setInput("extractLabel", "");
         setInput("extractSince", "");
+        setInput("extractFollowupInput", "");
         setText("extractDropTitle", "Drop a file here or choose one");
         document.getElementById("extractDropzone")?.classList.remove("has-file");
         showExtractError("");
@@ -615,16 +790,46 @@ function initializeExtract() {
         renderExtractResults();
     });
 
-    const results = document.getElementById("extractResults");
-    results?.addEventListener("input", onExtractFieldChange);
-    results?.addEventListener("change", onExtractFieldChange);
-    results?.addEventListener("click", onExtractClick);
-    results?.addEventListener("ownerschange", function (event) {
-        const card = event.target.closest(".extract-card");
-        const item = card && findExtractItem(card.dataset.key);
-        if (item && event.target._picker) { item.owners = event.target._picker.getList(); item.error = ""; updateExtractCardState(card, item); }
+    // Task cards in the finder AND in chat answers share these handlers.
+    ["extractResults", "aiMessages"].forEach(function (id) {
+        const box = document.getElementById(id);
+        if (!box) return;
+        box.addEventListener("input", onExtractFieldChange);
+        box.addEventListener("change", onExtractFieldChange);
+        box.addEventListener("click", onExtractClick);
+        box.addEventListener("ownerschange", function (event) {
+            const card = event.target.closest(".extract-card");
+            const item = card && findProposalItem(card.dataset.key);
+            if (item && event.target._picker) { item.owners = event.target._picker.getList(); item.error = ""; updateExtractCardState(card, item); }
+        });
     });
 
+    // Follow-up chat about the same source
+    const followForm = document.getElementById("extractFollowupForm");
+    const followInput = document.getElementById("extractFollowupInput");
+    followForm?.addEventListener("submit", function (event) {
+        event.preventDefault();
+        sendExtractFollowup();
+    });
+    followInput?.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            sendExtractFollowup();
+        }
+    });
+    document.getElementById("extractFollowupThread")?.addEventListener("click", function (event) {
+        const jump = event.target.closest("[data-jump-key]");
+        if (!jump) return;
+        const card = document.querySelector(`#extractResults .extract-card[data-key="${jump.dataset.jumpKey}"]`);
+        if (card) { card.scrollIntoView({ block: "center" }); flashCard(card); }
+    });
+
+}
+
+function flashCard(card) {
+    card.classList.remove("is-new");
+    void card.offsetWidth;
+    card.classList.add("is-new");
 }
 
 function updateExtractCharCount() {
@@ -679,7 +884,7 @@ async function handleExtractFile(file) {
 
 async function runExtract() {
 
-    if (extractState.running) return;
+    if (extractState.running || extractState.followupBusy) return;
 
     let text = getInput("extractText").trim();
     const since = getInput("extractSince");
@@ -697,11 +902,16 @@ async function runExtract() {
             (extractState.sourceType === "whatsapp" ? " Use \"Only messages since\" to pick recent messages." : " Split it into parts."));
     }
 
+    const pdf = extractState.pdfBase64 && !text ? extractState.pdfBase64 : "";
+
     showExtractError("");
     extractState.running = true;
     extractState.items = [];
     extractState.summary = "";
     extractState.savedNoteId = "";
+    extractState.followup = [];
+    extractState.sourceText = "";
+    extractState.sourcePdf = "";
     extractState.sourceLabel = getInput("extractLabel").trim() || extractState.fileName ||
         (extractState.sourceType === "whatsapp" ? "WhatsApp chat" : "meeting notes");
     renderExtractResults();
@@ -712,7 +922,7 @@ async function runExtract() {
     const result = await apiRequest("aiExtractTasks", {
         sourceType: extractState.sourceType,
         text: text,
-        pdfBase64: extractState.pdfBase64 && !text ? extractState.pdfBase64 : "",
+        pdfBase64: pdf,
         fileName: extractState.fileName,
         label: getInput("extractLabel").trim(),
         saveToKnowledge: !!document.getElementById("extractSaveKb")?.checked
@@ -727,21 +937,21 @@ async function runExtract() {
         return;
     }
 
+    // Kept so the follow-up chat can send the same source again.
+    extractState.sourceText = text;
+    extractState.sourcePdf = pdf;
+
     extractState.summary = result.summary || "";
     extractState.savedNoteId = result.savedNoteId || "";
     extractState.items = (result.tasks || []).map(function (t) {
-        return Object.assign({}, t, { selected: !t.duplicateOf, status: "idle", error: "", createdId: "" });
+        return Object.assign({}, t, { mode: "extract", sourceLabel: extractState.sourceLabel, selected: !t.duplicateOf, status: "idle", error: "", createdId: "" });
     });
 
     if (result.savedNoteId) kbNotes = null;   // reload the knowledge base next time
 
     renderExtractResults();
-    document.getElementById("extractResults")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("extractResults")?.scrollIntoView({ block: "start" });
 
-}
-
-function findExtractItem(key) {
-    return extractState.items.find(function (i) { return i.key === key; });
 }
 
 function extractDepartmentOptions(selected) {
@@ -754,39 +964,77 @@ function extractDepartmentOptions(selected) {
 
 function extractCardHtml(item) {
 
+    const chat = item.mode === "chat";
+
     if (item.status === "added") {
         return `
             <article class="extract-card is-added" data-key="${escapeHtml(item.key)}">
                 <span class="extract-added-mark" aria-hidden="true">✓</span>
                 <div class="extract-added-body">
                     <strong>${escapeHtml(item.title)}</strong>
-                    <span>Added to ${item.destination === "backlog" ? "Backlog" : "Tasks"} as
+                    <span>${chat ? "Created in" : "Added to"} ${item.destination === "backlog" ? "Backlog" : "All Tasks"} as
                     <button type="button" class="ai-task-link" data-task-id="${escapeHtml(item.createdId)}">${escapeHtml(item.createdId)}</button></span>
                 </div>
             </article>
         `;
     }
 
+    if (item.status === "dismissed") {
+        return `
+            <article class="extract-card is-dismissed" data-key="${escapeHtml(item.key)}">
+                <span class="extract-dismissed-text">Dismissed: ${escapeHtml(item.title)}</span>
+                <button type="button" class="link-button proposal-undo">Undo</button>
+            </article>
+        `;
+    }
+
     const opt = function (value, label, current) { return `<option value="${value}"${value === current ? " selected" : ""}>${label}</option>`; };
     const saving = item.status === "saving";
+    const isBacklog = item.destination === "backlog";
 
-    return `
-        <article class="extract-card${item.selected ? " is-selected" : ""}" data-key="${escapeHtml(item.key)}">
+    const head = chat
+        ? `
+            <div class="extract-card-head">
+                <span class="proposal-tag">${isBacklog ? "Proposed backlog item" : "Proposed task"}</span>
+                <select data-field="destination" class="extract-destination" aria-label="Add to" ${saving ? "disabled" : ""}>
+                    ${opt("task", "As a task", item.destination)}
+                    ${opt("backlog", "To backlog", item.destination)}
+                </select>
+            </div>`
+        : `
             <div class="extract-card-head">
                 <label class="switch">
                     <input type="checkbox" data-field="selected" ${item.selected ? "checked" : ""} ${saving ? "disabled" : ""}>
                     <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                    <span class="switch-label">Add this ${item.destination === "backlog" ? "to backlog" : "task"}</span>
+                    <span class="switch-label">Add this ${isBacklog ? "to backlog" : "task"}</span>
                 </label>
-                <select data-field="destination" class="extract-destination" aria-label="Add to">
+                ${item.fromFollowup ? `<span class="proposal-tag proposal-tag-new">From follow-up</span>` : ""}
+                <select data-field="destination" class="extract-destination" aria-label="Add to" ${saving ? "disabled" : ""}>
                     ${opt("task", "As a task", item.destination)}
                     ${opt("backlog", "To backlog", item.destination)}
                 </select>
-            </div>
+            </div>`;
+
+    const foot = chat
+        ? `
+            <div class="extract-card-foot">
+                <span class="extract-card-error" role="alert">${escapeHtml(item.error || "")}</span>
+                <button type="button" class="link-button proposal-dismiss" ${saving ? "disabled" : ""}>Dismiss</button>
+                <button type="button" class="primary-button extract-add-one" ${saving ? "disabled" : ""}>${saving ? "Creating…" : "Approve & create"}</button>
+            </div>`
+        : `
+            <div class="extract-card-foot">
+                <span class="extract-card-error" role="alert">${escapeHtml(item.error || "")}</span>
+                <button type="button" class="secondary-button extract-add-one" ${saving ? "disabled" : ""}>${saving ? "Adding…" : "Add now"}</button>
+            </div>`;
+
+    return `
+        <article class="extract-card${item.selected || chat ? " is-selected" : ""}${chat ? " is-chat" : ""}" data-key="${escapeHtml(item.key)}">
+            ${head}
 
             ${item.duplicateOf ? `<p class="extract-duplicate">Looks like existing task
                 <button type="button" class="ai-task-link" data-task-id="${escapeHtml(item.duplicateOf)}">${escapeHtml(item.duplicateOf)}</button>
-                “${escapeHtml(item.duplicateTitle)}”. Turned off so it isn't added twice.</p>` : ""}
+                “${escapeHtml(item.duplicateTitle)}”.${chat ? " Check before approving." : " Turned off so it isn't added twice."}</p>` : ""}
 
             <label class="sr-only" for="ex-title-${escapeHtml(item.key)}">Task title</label>
             <input type="text" id="ex-title-${escapeHtml(item.key)}" class="extract-title" data-field="title" value="${escapeHtml(item.title)}" maxlength="150">
@@ -808,17 +1056,14 @@ function extractCardHtml(item) {
                     <select data-field="priority">${opt("High", "High", item.priority)}${opt("Medium", "Medium", item.priority)}${opt("Low", "Low", item.priority)}</select>
                 </div>
                 <div class="extract-field">
-                    <span>${item.destination === "backlog" ? "Expected" : "Due date"}</span>
+                    <span>${isBacklog ? "Expected" : "Due date"}</span>
                     <input type="date" data-field="dueDate" value="${escapeHtml(item.dueDate)}">
                 </div>
             </div>
 
             ${item.sourceQuote ? `<blockquote class="extract-quote">${escapeHtml(item.sourceQuote)}</blockquote>` : ""}
 
-            <div class="extract-card-foot">
-                <span class="extract-card-error" role="alert">${escapeHtml(item.error || "")}</span>
-                <button type="button" class="secondary-button extract-add-one" ${saving ? "disabled" : ""}>${saving ? "Adding…" : "Add now"}</button>
-            </div>
+            ${foot}
         </article>
     `;
 
@@ -838,10 +1083,11 @@ function renderExtractResults() {
                     <p>Long transcripts take a minute or two. Keep this tab open.</p>
                 </div>
             </div>`;
+        renderExtractFollowup();
         return;
     }
 
-    if (!extractState.summary && !extractState.items.length) { box.innerHTML = ""; return; }
+    if (!extractState.summary && !extractState.items.length) { box.innerHTML = ""; renderExtractFollowup(); return; }
 
     const remaining = extractState.items.filter(function (i) { return i.status !== "added"; });
     const selectedCount = remaining.filter(function (i) { return i.selected; }).length;
@@ -855,7 +1101,7 @@ function renderExtractResults() {
                     <button type="button" class="ai-task-link" data-task-id="${escapeHtml(extractState.savedNoteId)}">${escapeHtml(extractState.savedNoteId)}</button></span>` : ""}
             </div>
             ${extractState.summary ? `<p>${escapeHtml(extractState.summary)}</p>` : ""}
-            ${!extractState.items.length ? `<p class="extract-empty-hint">Nothing in there reads like a task or assignment. If you expected some, check the right source type is selected and that the text includes who said what.</p>` : ""}
+            ${!extractState.items.length ? `<p class="extract-empty-hint">Nothing in there reads like a task or assignment. If you expected some, tell the AI below what was missed, or check the right source type is selected.</p>` : ""}
         </div>
 
         ${extractState.items.length ? `
@@ -873,25 +1119,13 @@ function renderExtractResults() {
         ` : ""}
     `;
 
-    box.querySelectorAll(".extract-card").forEach(function (card) {
-        const item = findExtractItem(card.dataset.key);
-        const root = card.querySelector("[data-owner-picker]");
-        if (!item || !root) return;
-        const picker = createOwnerPicker(root);
-        picker.setValue(joinOwners(item.owners || []));
-        if (item.status === "saving") picker.setDisabled(true);
-        extraOwnerPickers.push(picker);
-    });
-
-    // drop pickers whose cards are gone
-    for (let i = extraOwnerPickers.length - 1; i >= 0; i--) {
-        if (!document.body.contains(extraOwnerPickers[i].root)) extraOwnerPickers.splice(i, 1);
-    }
+    mountProposalPickers(box);
+    renderExtractFollowup();
 
 }
 
 function updateExtractCardState(card, item) {
-    card.classList.toggle("is-selected", !!item.selected);
+    card.classList.toggle("is-selected", !!item.selected || item.mode === "chat");
     const err = card.querySelector(".extract-card-error");
     if (err) err.textContent = item.error || "";
     const label = card.querySelector(".switch-label");
@@ -911,7 +1145,7 @@ function onExtractFieldChange(event) {
     const field = event.target.dataset?.field;
     if (!field) return;
     const card = event.target.closest(".extract-card");
-    const item = card && findExtractItem(card.dataset.key);
+    const item = card && findProposalItem(card.dataset.key);
     if (!item) return;
 
     item[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
@@ -947,10 +1181,28 @@ function onExtractClick(event) {
         return;
     }
 
-    const one = event.target.closest(".extract-add-one");
-    if (one) {
-        const item = findExtractItem(one.closest(".extract-card").dataset.key);
-        if (item) addExtractItems([item]);
+    const approveAll = event.target.closest(".ai-approve-all");
+    if (approveAll) {
+        const message = aiMessages[Number(approveAll.dataset.msgIndex)];
+        if (message) addExtractItems((message.proposals || []).filter(function (p) { return p.status === "idle"; }));
+        return;
+    }
+
+    const card = event.target.closest(".extract-card");
+    const item = card && findProposalItem(card.dataset.key);
+    if (!item) return;
+
+    if (event.target.closest(".extract-add-one")) { addExtractItems([item]); return; }
+
+    if (event.target.closest(".proposal-dismiss")) {
+        item.status = "dismissed";
+        rerenderProposalItems([item]);
+        return;
+    }
+
+    if (event.target.closest(".proposal-undo")) {
+        item.status = "idle";
+        rerenderProposalItems([item]);
     }
 
 }
@@ -964,26 +1216,29 @@ function validateExtractItem(item) {
     return "";
 }
 
-async function addExtractItems(items) {
+/* Saves cards from the task finder or the chat. Returns a summary
+   { createdItems, invalid, failed } so the chat can report it. */
+async function addExtractItems(items, options = {}) {
 
-    if (!items.length || isRequestActive("extractAdd")) return;
+    const outcome = { createdItems: [], invalid: 0, failed: 0 };
+    if (!items.length || isRequestActive("extractAdd")) return outcome;
 
-    let invalid = 0;
-    items.forEach(function (item) { item.error = validateExtractItem(item); if (item.error) invalid++; });
+    items.forEach(function (item) { item.error = validateExtractItem(item); if (item.error) outcome.invalid++; });
 
     const valid = items.filter(function (i) { return !i.error; });
     if (!valid.length) {
-        renderExtractResults();
-        return showNotification("Not added", invalid === 1 ? "Fill in the highlighted task first." : "Fill in the highlighted tasks first.");
+        rerenderProposalItems(items);
+        if (!options.quiet) showNotification("Not added", outcome.invalid === 1 ? "Fill in the highlighted task first." : "Fill in the highlighted tasks first.");
+        return outcome;
     }
 
     valid.forEach(function (i) { i.status = "saving"; });
-    renderExtractResults();
+    rerenderProposalItems(items);
 
     let result = null;
     await guardAsync("extractAdd", async function () {
         result = await apiRequest("createTasksBulk", {
-            sourceLabel: extractState.sourceLabel,
+            sourceLabel: valid[0].sourceLabel || extractState.sourceLabel || "AI Assistant",
             tasks: valid.map(function (i) {
                 return {
                     clientKey: i.key,
@@ -1001,32 +1256,144 @@ async function addExtractItems(items) {
 
     if (!result || !result.success) {
         valid.forEach(function (i) { i.status = "idle"; i.error = result?.message || "Couldn't add it. Press ↻ to check before trying again."; });
-        renderExtractResults();
-        return showNotification("Not added", result?.message || "Couldn't add the tasks.");
+        outcome.failed = valid.length;
+        rerenderProposalItems(items);
+        if (!options.quiet) showNotification("Not added", result?.message || "Couldn't add the tasks.");
+        return outcome;
     }
 
-    let created = 0;
     (result.results || []).forEach(function (r) {
-        const item = findExtractItem(r.clientKey);
+        const item = findProposalItem(r.clientKey);
         if (!item) return;
         if (r.success) {
             item.status = "added";
             item.createdId = r.id;
-            created++;
+            outcome.createdItems.push(item);
             if (r.task) upsertLocalTask(r.task);
             if (r.item) { backlogTasks.push(r.item); lastSignature = ""; persistLocalCacheSoon(); }
         } else {
             item.status = "idle";
             item.error = r.message || "Couldn't add it.";
+            outcome.failed++;
         }
     });
 
-    renderExtractResults();
-    showNotification(created ? "Added" : "Not added",
-        created + " of " + valid.length + " added" + (invalid ? ". " + invalid + " need details first." : "."));
+    rerenderProposalItems(items);
+    if (!options.quiet) {
+        const created = outcome.createdItems.length;
+        showNotification(created ? "Added" : "Not added",
+            created === 1 && valid.length === 1 ? "Created " + outcome.createdItems[0].createdId + "."
+                : created + " of " + valid.length + " added" + (outcome.invalid ? ". " + outcome.invalid + " need details first." : "."));
+    }
+    return outcome;
 
 }
 
+/* =========================================================
+   [v9] FOLLOW-UP CHAT ABOUT THE SAME SOURCE
+========================================================= */
+
+function renderExtractFollowup() {
+
+    const panel = document.getElementById("extractFollowup");
+    if (!panel) return;
+
+    const hasSource = !!(extractState.sourceText || extractState.sourcePdf);
+    const show = !extractState.running && hasSource && !!(extractState.summary || extractState.items.length);
+    panel.hidden = !show;
+    if (!show) return;
+
+    const thread = document.getElementById("extractFollowupThread");
+    const html = extractState.followup.map(function (m) {
+        if (m.role === "user") return `<div class="ai-msg ai-msg-user"><div class="ai-bubble">${escapeHtml(m.content)}</div></div>`;
+        if (m.role === "error") return `<div class="ai-msg ai-msg-error"><div class="ai-bubble">${escapeHtml(m.content)}</div></div>`;
+        return `
+            <div class="ai-msg ai-msg-assistant">
+                <div class="ai-bubble ai-answer">
+                    ${renderMarkdownLite(m.content)}
+                    ${m.added ? `<p class="followup-added">${m.added} new card${m.added === 1 ? "" : "s"} added to the list.
+                        <button type="button" class="link-button" data-jump-key="${escapeHtml(m.firstKey)}">Show</button></p>` : ""}
+                </div>
+            </div>`;
+    }).join("") + (extractState.followupBusy ? `
+        <div class="ai-msg ai-msg-assistant">
+            <div class="ai-bubble ai-thinking"><span class="ai-dots"><i></i><i></i><i></i></span> Reading the ${extractState.sourceType === "whatsapp" ? "chat" : "transcript"} again…</div>
+        </div>` : "");
+
+    if (thread) {
+        thread.innerHTML = html;
+        thread.hidden = !html;
+        thread.scrollTop = thread.scrollHeight;
+    }
+
+    const send = document.getElementById("extractFollowupSend");
+    if (send) send.disabled = extractState.followupBusy;
+
+}
+
+async function sendExtractFollowup() {
+
+    const input = document.getElementById("extractFollowupInput");
+    const message = String(input?.value || "").trim();
+    if (!message || extractState.followupBusy || extractState.running) return;
+
+    const history = extractState.followup
+        .filter(function (m) { return m.role === "user" || m.role === "assistant"; })
+        .slice(-8)
+        .map(function (m) {
+            return {
+                role: m.role,
+                content: m.content + (m.addedTitles && m.addedTitles.length ? "\n[Cards added: " + m.addedTitles.join("; ") + "]" : "")
+            };
+        });
+
+    extractState.followup.push({ role: "user", content: message });
+    if (input) input.value = "";
+    extractState.followupBusy = true;
+    renderExtractFollowup();
+
+    const result = await apiRequest("aiExtractFollowup", {
+        sourceType: extractState.sourceType,
+        text: extractState.sourceText,
+        pdfBase64: extractState.sourceText ? "" : extractState.sourcePdf,
+        label: extractState.sourceLabel,
+        message: message,
+        history: history,
+        existing: extractState.items.map(function (i) {
+            return { title: i.title, owners: i.owners || [], dueDate: i.dueDate, status: i.status };
+        })
+    }, { timeoutMs: AI_EXTRACT_TIMEOUT_MS, silent: true });
+
+    extractState.followupBusy = false;
+
+    if (!result || !result.success) {
+        extractState.followup.push({ role: "error", content: result?.message || "The AI couldn't answer just now. Try again." });
+        renderExtractFollowup();
+        return;
+    }
+
+    const fresh = toProposalItems(result.tasks, "extract", extractState.sourceLabel, { fromFollowup: true });
+    fresh.forEach(function (i) { i.selected = !i.duplicateOf; });
+    extractState.items = extractState.items.concat(fresh);
+
+    extractState.followup.push({
+        role: "assistant",
+        content: result.reply || "",
+        added: fresh.length,
+        firstKey: fresh.length ? fresh[0].key : "",
+        addedTitles: fresh.map(function (i) { return i.title; })
+    });
+
+    renderExtractResults();
+
+    if (fresh.length) {
+        const card = document.querySelector(`#extractResults .extract-card[data-key="${fresh[0].key}"]`);
+        if (card) flashCard(card);
+    }
+
+    input?.focus();
+
+}
 
 /* =========================================================
    KNOWLEDGE BASE (Founder / Operations Head)
