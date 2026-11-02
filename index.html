@@ -17,11 +17,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=Inter:wght@400..800&family=IBM+Plex+Mono:wght@600&display=swap" rel="stylesheet">
 
     <!-- When you change a CSS/JS file, raise the ?v= number so every browser loads the new copy -->
-    <link rel="stylesheet" href="style.css?v=9.0">
-    <link rel="stylesheet" href="enhancements.css?v=9.0">
-    <link rel="stylesheet" href="polish.css?v=9.0">
-    <link rel="stylesheet" href="features.css?v=9.0">
-    <link rel="stylesheet" href="v9.css?v=9.0">
+    <link rel="stylesheet" href="style.css?v=9.1">
+    <link rel="stylesheet" href="enhancements.css?v=9.1">
+    <link rel="stylesheet" href="polish.css?v=9.1">
+    <link rel="stylesheet" href="features.css?v=9.1">
+    <link rel="stylesheet" href="v9.css?v=9.1">
     <link rel="preload" as="image" href="assets/logo-usedbookr.png">
 </head>
 <body>
@@ -83,7 +83,7 @@
                 </button>
             </form>
 
-            <div class="login-footer">Authorized operations access, v9.0</div>
+            <div class="login-footer">Authorized operations access, v9.1</div>
         </div>
     </div>
 </div>
@@ -116,6 +116,7 @@
             <button class="nav-item" data-page="tasks"><span class="nav-icon">✓</span><span>All Tasks</span></button>
             <button class="nav-item" data-page="regularTasks"><span class="nav-icon">↺</span><span>Regular Tasks</span></button>
             <button class="nav-item" data-page="followups"><span class="nav-icon">↻</span><span>Follow-ups</span></button>
+            <button class="nav-item" data-page="calendar"><span class="nav-icon">▣</span><span>Calendar</span></button>
             <button class="nav-item" data-page="backlog"><span class="nav-icon">▤</span><span>Backlog</span></button>
             <button class="nav-item" data-page="bookFair"><span class="nav-icon">◆</span><span>Book Fair</span></button>
 
@@ -142,7 +143,7 @@
                 </div>
             </div>
             <button id="logoutButton" class="logout-button"><span aria-hidden="true">&#10148;</span> Logout</button>
-            <div class="app-version">Version 9.0</div>
+            <div class="app-version">Version 9.1</div>
         </div>
     </aside>
 
@@ -370,6 +371,49 @@
                 </div>
             </section>
 
+            <!-- CALENDAR (IST) -->
+            <section id="calendarPage" class="page">
+                <div class="page-header">
+                    <div>
+                        <span class="page-label">Plan and remember</span>
+                        <h2>Calendar</h2>
+                        <p>Due dates, follow-ups, scheduled regular tasks and reminders. All times are India time (IST).</p>
+                    </div>
+                    <button id="calendarAddReminder" class="primary-button" type="button">+ Add reminder</button>
+                </div>
+
+                <div class="panel calendar-toolbar">
+                    <div class="calendar-nav">
+                        <button id="calPrev" class="secondary-button cal-icon-button" type="button" aria-label="Previous month">‹</button>
+                        <button id="calToday" class="secondary-button" type="button">Today</button>
+                        <button id="calNext" class="secondary-button cal-icon-button" type="button" aria-label="Next month">›</button>
+                        <h3 id="calMonthTitle">Calendar</h3>
+                    </div>
+                    <div id="calFilters" class="calendar-filters" role="group" aria-label="Show">
+                        <label class="cal-filter is-on"><input type="checkbox" data-filter="due" checked><i class="cal-dot cal-due"></i>Due dates</label>
+                        <label class="cal-filter is-on"><input type="checkbox" data-filter="followup" checked><i class="cal-dot cal-followup"></i>Follow-ups</label>
+                        <label class="cal-filter is-on"><input type="checkbox" data-filter="regular" checked><i class="cal-dot cal-regular"></i>Regular tasks</label>
+                        <label class="cal-filter is-on"><input type="checkbox" data-filter="reminder" checked><i class="cal-dot cal-reminder"></i>Reminders</label>
+                    </div>
+                </div>
+
+                <div class="calendar-layout">
+                    <div class="panel calendar-month">
+                        <div class="calendar-weekdays" aria-hidden="true"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+                        <div id="calGrid" class="calendar-grid"></div>
+                        <p id="calLoadingNote" class="cal-loading-note">Loading reminders and regular-task schedules…</p>
+                    </div>
+                    <div id="calDayPanel" class="panel calendar-day">
+                        <div class="calendar-day-head">
+                            <h3 id="calDayTitle">Today</h3>
+                            <span id="calDaySub"></span>
+                        </div>
+                        <div id="calDayList" class="calendar-day-list"></div>
+                        <button id="calAddForDay" class="secondary-button calendar-day-add" type="button">+ Reminder on this day</button>
+                    </div>
+                </div>
+            </section>
+
             <!-- AI ASSISTANT -->
             <section id="aiPage" class="page">
                 <div class="page-header">
@@ -565,6 +609,63 @@
                         <div id="departmentAdminList" class="department-admin-list"></div>
                     </div>
                 </div>
+
+                <!-- WHATSAPP REMINDERS -->
+                <div class="panel wa-panel">
+                    <div class="panel-header">
+                        <div><h3>WhatsApp reminders</h3><p>Sent through BusinessOnBot. All times are India time (IST).</p></div>
+                        <span id="waModeBadge" class="wa-mode-badge">Test mode: log only</span>
+                    </div>
+
+                    <div class="wa-body">
+                        <div class="wa-settings">
+                            <div class="wa-mode" role="radiogroup" aria-label="Sending mode">
+                                <label class="extract-source"><input type="radio" name="waMode" value="test" checked><span>Test: write to the log only</span></label>
+                                <label class="extract-source"><input type="radio" name="waMode" value="live"><span>Live: send on WhatsApp</span></label>
+                            </div>
+                            <p id="waConnection" class="wa-connection"></p>
+
+                            <div class="wa-rule">
+                                <label class="switch"><input type="checkbox" id="waSummaryOn" checked><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="switch-label">Morning summary</span></label>
+                                <span class="wa-rule-text">Today's tasks, overdue tasks and today's regular tasks, one message per person.</span>
+                                <label class="wa-time">at <input type="time" id="waMorningTime" value="09:30"></label>
+                            </div>
+                            <div class="wa-rule">
+                                <label class="switch"><input type="checkbox" id="waRegularOn" checked><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="switch-label">Regular-task reminder</span></label>
+                                <span class="wa-rule-text">Only if nothing is logged that day. Sent at the task's own time, or else at:</span>
+                                <label class="wa-time">at <input type="time" id="waRegularTime" value="16:00"></label>
+                            </div>
+                            <div class="wa-rule">
+                                <label class="switch"><input type="checkbox" id="waOverdueOn" checked><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="switch-label">Overdue nudge</span></label>
+                                <span class="wa-rule-text">Once a day, only to people with overdue tasks.</span>
+                                <label class="wa-time">at <input type="time" id="waOverdueTime" value="17:30"></label>
+                            </div>
+                            <div class="wa-rule">
+                                <label class="switch"><input type="checkbox" id="waReminderOn" checked><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="switch-label">Calendar reminders</span></label>
+                                <span class="wa-rule-text">At each reminder's own time, when "Also send on WhatsApp" is ticked.</span>
+                            </div>
+
+                            <div class="wa-actions">
+                                <button type="button" id="waSaveSettings" class="primary-button">Save settings</button>
+                                <button type="button" id="waTestButton" class="secondary-button">Send test to me</button>
+                                <button type="button" id="waPreviewButton" class="secondary-button">Preview today's messages</button>
+                            </div>
+                        </div>
+
+                        <div class="wa-people">
+                            <h4>Team WhatsApp numbers</h4>
+                            <p>Switch a person off to stop their reminders. Numbers without +91 are treated as Indian.</p>
+                            <div id="waContacts" class="wa-contacts"><div class="empty-state">Loading…</div></div>
+                        </div>
+                    </div>
+
+                    <div id="waPreview" class="wa-preview" hidden></div>
+
+                    <div class="wa-log">
+                        <h4>Recent messages</h4>
+                        <div id="waLog"></div>
+                    </div>
+                </div>
             </section>
         </div>
     </main>
@@ -574,7 +675,7 @@
         <button type="button" class="tab-item active" data-page="dashboard"><span class="tab-icon" aria-hidden="true">▦</span><span>Home</span></button>
         <button type="button" class="tab-item" data-page="tasks"><span class="tab-icon" aria-hidden="true">✓</span><span>Tasks</span></button>
         <button type="button" class="tab-item" data-page="regularTasks"><span class="tab-icon" aria-hidden="true">↺</span><span>Regular</span></button>
-        <button type="button" class="tab-item" data-page="followups"><span class="tab-icon" aria-hidden="true">↻</span><span>Follow-ups</span></button>
+        <button type="button" class="tab-item" data-page="calendar"><span class="tab-icon" aria-hidden="true">▣</span><span>Calendar</span></button>
         <button type="button" class="tab-item" data-action="menu"><span class="tab-icon" aria-hidden="true">☰</span><span>More</span></button>
     </nav>
 </div>
@@ -922,12 +1023,14 @@
                     <label id="regularTaskOwnersLabel">Owners</label>
                     <div id="regularTaskOwnerPicker" class="owner-picker" aria-labelledby="regularTaskOwnersLabel"></div>
                 </div>
+                <div class="form-group full-width">
+                    <label id="regularTaskScheduleLabel">Repeats *</label>
+                    <div id="regularTaskSchedulePicker" class="schedule-picker" aria-labelledby="regularTaskScheduleLabel"></div>
+                </div>
                 <div class="form-group">
-                    <label for="regularTaskFrequency">How often *</label>
-                    <input type="text" id="regularTaskFrequency" list="regularTaskFrequencyOptions" placeholder="daily, weekly, twice weekly, monthly…">
-                    <datalist id="regularTaskFrequencyOptions">
-                        <option value="daily"></option><option value="twice weekly"></option><option value="weekly"></option><option value="monthly"></option>
-                    </datalist>
+                    <label for="regularTaskTime">Time (IST) <span class="field-optional">(optional)</span></label>
+                    <input type="time" id="regularTaskTime">
+                    <small class="meta-field-hint">The WhatsApp reminder goes at this time if nothing is logged.</small>
                 </div>
                 <div class="form-group">
                     <label for="regularTaskPriority">Priority</label>
@@ -1084,6 +1187,53 @@
     </div>
 </div>
 
+<!-- REMINDER MODAL -->
+<div id="reminderModal" class="modal-overlay" style="display:none;">
+    <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="reminderModalTitle">
+        <div class="modal-header">
+            <div><span class="modal-label">Calendar</span><h2 id="reminderModalTitle">Add reminder</h2></div>
+            <button type="button" class="modal-close" data-close-reminder aria-label="Close">×</button>
+        </div>
+        <form id="reminderForm" class="modal-form" novalidate>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="reminderTitle">What *</label>
+                    <input type="text" id="reminderTitle" placeholder="e.g. Pay warehouse rent" maxlength="150">
+                </div>
+                <div class="form-group">
+                    <label for="reminderDate">Date *</label>
+                    <input type="date" id="reminderDate">
+                </div>
+                <div class="form-group">
+                    <label for="reminderTime">Time (IST)</label>
+                    <input type="time" id="reminderTime">
+                </div>
+                <div class="form-group full-width">
+                    <label id="reminderRepeatLabel">Repeats</label>
+                    <div id="reminderSchedulePicker" class="schedule-picker" aria-labelledby="reminderRepeatLabel"></div>
+                </div>
+                <div class="form-group full-width">
+                    <label id="reminderOwnersLabel">For</label>
+                    <div id="reminderOwnerPicker" class="owner-picker" aria-labelledby="reminderOwnersLabel"></div>
+                </div>
+                <div class="form-group full-width">
+                    <label for="reminderNotes">Notes <span class="field-optional">(optional)</span></label>
+                    <textarea id="reminderNotes" rows="2" placeholder="Anything to remember with it"></textarea>
+                </div>
+                <label class="extract-check full-width"><input type="checkbox" id="reminderWhatsApp"> Also send on WhatsApp at this time</label>
+                <label class="extract-check full-width" id="reminderDoneGroup" hidden><input type="checkbox" id="reminderDone"> Mark as done</label>
+            </div>
+            <small id="reminderMeta" class="meta-field-hint"></small>
+            <div id="reminderFormError" class="form-inline-error" role="alert"></div>
+            <div class="modal-footer">
+                <button type="button" id="reminderDeleteButton" class="danger-button modal-footer-left" style="display:none;">Delete</button>
+                <button type="button" class="secondary-button" data-close-reminder>Cancel</button>
+                <button type="submit" class="primary-button" id="reminderSaveButton">Save reminder</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- MOVE / COPY MODAL (Founder / Operations Head) -->
 <div id="moveModal" class="modal-overlay" style="display:none;">
     <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="moveModalTitle">
@@ -1159,9 +1309,11 @@
     <span id="actionLoaderText">Saving…</span>
 </div>
 
-<script src="script.js?v=9.0" defer></script>
-<script src="ai.js?v=9.0" defer></script>
-<script src="admin.js?v=9.0" defer></script>
-<script src="moves.js?v=9.0" defer></script>
+<script src="script.js?v=9.1" defer></script>
+<script src="ai.js?v=9.1" defer></script>
+<script src="admin.js?v=9.1" defer></script>
+<script src="moves.js?v=9.1" defer></script>
+<script src="calendar.js?v=9.1" defer></script>
+<script src="whatsapp.js?v=9.1" defer></script>
 </body>
 </html>
