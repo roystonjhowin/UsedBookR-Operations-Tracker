@@ -27,6 +27,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     contacts?.addEventListener("change", function (event) {
         const row = event.target.closest(".wa-contact");
+        if (event.target.classList.contains("wa-type")) event.target.closest(".chip-check")?.classList.toggle("is-on", event.target.checked);
         if (row) row.querySelector(".wa-contact-save").disabled = false;
     });
     contacts?.addEventListener("click", function (event) {
@@ -106,9 +107,14 @@ function paintWhatsAppContacts() {
     const people = (waState.contacts || []).filter(function (c) { return c.active; });
     if (!people.length) { box.innerHTML = `<div class="empty-state">No active team members.</div>`; return; }
 
+    const short = { summary: "Morning summary", regular: "Regular reminders", overdue: "Overdue nudge", reminder: "Calendar reminders" };
+    const today = typeof istNow === "function" ? istNow().ymd : "";
+
     box.innerHTML = people.map(function (c) {
+        const skip = c.skip || [];
+        const paused = c.pauseUntil && today && today <= c.pauseUntil;
         return `
-            <div class="wa-contact" data-username="${escapeHtml(c.username)}">
+            <div class="wa-contact${c.alerts ? "" : " is-off"}" data-username="${escapeHtml(c.username)}">
                 <span class="wa-contact-name">${escapeHtml(c.name)}</span>
                 <input type="tel" class="wa-contact-number" value="${escapeHtml(formatPhone(c.number))}" placeholder="+91 98450 12345" aria-label="WhatsApp number for ${escapeHtml(c.name)}" inputmode="tel" autocomplete="off">
                 <label class="switch" title="Send WhatsApp reminders to ${escapeHtml(c.name)}">
@@ -117,6 +123,14 @@ function paintWhatsAppContacts() {
                     <span class="sr-only">Reminders on</span>
                 </label>
                 <button type="button" class="secondary-button wa-contact-save" disabled>Save</button>
+                <div class="wa-contact-types" role="group" aria-label="Messages ${escapeHtml(c.name)} gets">
+                    ${Object.keys(short).map(function (t) {
+                        const on = skip.indexOf(t) === -1;
+                        return `<label class="chip-check${on ? " is-on" : ""}"><input type="checkbox" class="wa-type" value="${t}" ${on ? "checked" : ""}><span>${short[t]}</span></label>`;
+                    }).join("")}
+                    <label class="wa-pause">Pause until <input type="date" class="wa-contact-pause" value="${escapeHtml(c.pauseUntil || "")}" aria-label="Pause ${escapeHtml(c.name)}'s messages until"></label>
+                    ${paused ? `<span class="wa-status is-test">Paused till ${escapeHtml(displayDate(c.pauseUntil))}</span>` : ""}
+                </div>
             </div>`;
     }).join("");
 
@@ -188,7 +202,9 @@ async function saveWhatsAppContact(row) {
     const payload = {
         username: row.dataset.username,
         number: row.querySelector(".wa-contact-number").value.trim(),
-        alerts: row.querySelector(".wa-contact-alerts").checked
+        alerts: row.querySelector(".wa-contact-alerts").checked,
+        skip: Array.from(row.querySelectorAll(".wa-type")).filter(function (i) { return !i.checked; }).map(function (i) { return i.value; }),
+        pauseUntil: row.querySelector(".wa-contact-pause").value
     };
 
     setButtonLoading(button, true);
