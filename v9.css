@@ -799,3 +799,13 @@ tr.row-clickable { cursor: pointer; }
 
 /* Selected days / dates in the schedule picker read clearly */
 .schedule-picker .chip-check.is-on { background: var(--forest); border-color: var(--forest); color: #fff; }
+
+/* Per-person message choices */
+.wa-contact { padding: 12px 0; }
+.wa-contact-types { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.wa-contact-types .chip-check { font-size: 12px; padding: 5px 10px; }
+.wa-contact-types .chip-check.is-on { background: rgba(31, 109, 69, 0.1); border-color: var(--forest-mid); color: var(--forest-dark); }
+.wa-contact.is-off .wa-contact-types { opacity: 0.45; }
+.wa-pause { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-left: 4px; }
+.wa-pause input { min-height: 32px; padding: 0 8px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface-alt); font: inherit; color: var(--ink); }
+@media (max-width: 700px) { .wa-pause { margin-left: 0; width: 100%; } .wa-pause input { flex: 1; } }
