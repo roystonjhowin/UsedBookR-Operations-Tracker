@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#0d2b1c">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/app-icons/favicon-32.png">
+    <link rel="apple-touch-icon" href="assets/app-icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Excelso">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="description" content="Excelso — UsedBookR / Simply Sell Books operations tracker">
     <title>Excelso — Operations Management</title>
 
@@ -17,11 +24,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=Inter:wght@400..800&family=IBM+Plex+Mono:wght@600&display=swap" rel="stylesheet">
 
     <!-- When you change a CSS/JS file, raise the ?v= number so every browser loads the new copy -->
-    <link rel="stylesheet" href="style.css?v=9.2">
-    <link rel="stylesheet" href="enhancements.css?v=9.2">
-    <link rel="stylesheet" href="polish.css?v=9.2">
-    <link rel="stylesheet" href="features.css?v=9.2">
-    <link rel="stylesheet" href="v9.css?v=9.2">
+    <link rel="stylesheet" href="style.css?v=9.4">
+    <link rel="stylesheet" href="enhancements.css?v=9.4">
+    <link rel="stylesheet" href="polish.css?v=9.4">
+    <link rel="stylesheet" href="features.css?v=9.4">
+    <link rel="stylesheet" href="v9.css?v=9.4">
     <link rel="preload" as="image" href="assets/logo-usedbookr.png">
 </head>
 <body>
@@ -80,6 +87,7 @@
                     <span>Keep me signed in on this device</span>
                 </label>
                 <p class="login-remember-hint">Untick this on a shared or public computer.</p>
+                <button type="button" class="install-app-button install-app-link" hidden>Install Excelso as an app on this phone</button>
 
                 <div id="loginError" class="login-error" role="alert">Incorrect username or password. Please try again.</div>
 
@@ -89,7 +97,7 @@
                 </button>
             </form>
 
-            <div class="login-footer">Authorized operations access, v9.2</div>
+            <div class="login-footer">Authorized operations access, v9.4</div>
         </div>
     </div>
 </div>
@@ -149,7 +157,8 @@
                 </div>
             </div>
             <button id="logoutButton" class="logout-button"><span aria-hidden="true">&#10148;</span> Logout</button>
-            <div class="app-version">Version 9.2</div>
+            <button type="button" class="install-app-button" hidden>Install Excelso app</button>
+            <div class="app-version">Version 9.4</div>
         </div>
     </aside>
 
@@ -1315,11 +1324,12 @@
     <span id="actionLoaderText">Saving…</span>
 </div>
 
-<script src="script.js?v=9.2" defer></script>
-<script src="ai.js?v=9.2" defer></script>
-<script src="admin.js?v=9.2" defer></script>
-<script src="moves.js?v=9.2" defer></script>
-<script src="calendar.js?v=9.2" defer></script>
-<script src="whatsapp.js?v=9.2" defer></script>
+<script src="script.js?v=9.4" defer></script>
+<script src="ai.js?v=9.4" defer></script>
+<script src="admin.js?v=9.4" defer></script>
+<script src="moves.js?v=9.4" defer></script>
+<script src="calendar.js?v=9.4" defer></script>
+<script src="whatsapp.js?v=9.4" defer></script>
+<script src="pwa.js?v=9.4" defer></script>
 </body>
 </html>
