@@ -50,7 +50,7 @@ let DEPARTMENTS = [
 
 const STATUS_ON_HOLD = "On Hold";
 
-const APP_VERSION = "9.1";
+const APP_VERSION = "9.2";
 
 const POLL_INTERVAL_MS = 60 * 1000;        // look for other people's changes every minute
 const REFOCUS_REFRESH_MS = 30 * 1000;      // refresh when you come back after 30 s+
@@ -302,6 +302,9 @@ function initializeLogin() {
     const form = document.getElementById("loginForm");
     if (!form) return;
 
+    const lastUsername = store.get("usedbookrLastUsername");
+    if (lastUsername) setInput("loginUsername", lastUsername);
+
     form.addEventListener("submit", async function (event) {
 
         event.preventDefault();
@@ -338,8 +341,17 @@ function initializeLogin() {
             currentUser = result.user;
             sessionToken = result.token;
 
+            // [v9.2] "Keep me signed in": swap the 6-hour session for a 30-day device key
+            if (document.getElementById("loginRemember")?.checked) {
+                const remembered = await apiRequest("rememberDevice", {
+                    deviceLabel: (navigator.userAgent || "").slice(0, 80)
+                }, { silent: true });
+                if (remembered && remembered.success && remembered.token) sessionToken = remembered.token;
+            }
+
             store.set("usedbookrCurrentUser", JSON.stringify(currentUser));
             store.set("usedbookrSessionToken", sessionToken);
+            store.set("usedbookrLastUsername", username);
 
             enterApp();
 
@@ -447,7 +459,8 @@ function logoutUser(options = {}) {
     closeAllOverlays();
     showLogin();
 
-    setInput("loginUsername", "");
+    // [v9.2] keep the username filled in, so only the password is needed
+    setInput("loginUsername", store.get("usedbookrLastUsername") || "");
     setInput("loginPassword", "");
 
 }
