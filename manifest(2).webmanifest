@@ -1,0 +1,86 @@
+{
+  "id": "/",
+  "name": "Excelso — UsedBookR Operations",
+  "short_name": "Excelso",
+  "description": "Tasks, regular tasks, follow-ups, calendar and reminders for the UsedBookR and SimplySellBooks team.",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "dir": "ltr",
+  "lang": "en-IN",
+  "background_color": "#0d2b1c",
+  "theme_color": "#0d2b1c",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "handle_links": "preferred",
+  "prefer_related_applications": false,
+  "related_applications": [],
+  "categories": [
+    "business",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "assets/app-icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/app-icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/app-icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "assets/app-screens/phone-dashboard.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Dashboard on a phone"
+    },
+    {
+      "src": "assets/app-screens/desktop-dashboard.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Dashboard on a computer"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "All Tasks",
+      "url": "/?page=tasks",
+      "icons": [
+        {
+          "src": "assets/app-icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Calendar",
+      "url": "/?page=calendar",
+      "icons": [
+        {
+          "src": "assets/app-icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
